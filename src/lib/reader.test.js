@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateMinutes, getInitials, normalizeText, readingProgress } from './reader.js'
+import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, readingProgress } from './reader.js'
 
 describe('reader utilities', () => {
   it('normalizes FB2-like text into readable paragraphs', () => {
@@ -19,5 +19,16 @@ describe('reader utilities', () => {
   it('builds a two-letter monogram from an author', () => {
     expect(getInitials('Михаил Булгаков')).toBe('МБ')
     expect(getInitials('Гомер')).toBe('Г')
+  })
+
+  it('preserves paragraph boundaries while paginating', () => {
+    expect(paginate('Глава первая\n\nПервый абзац.\n\nВторой абзац.', 30))
+      .toEqual(['Глава первая\n\nПервый абзац.', 'Второй абзац.'])
+  })
+
+  it('restores the page from saved percentage and actual page count', () => {
+    expect(pageFromProgress(50, 20)).toBe(9)
+    expect(pageFromProgress(100, 20)).toBe(19)
+    expect(pageFromProgress(30, 0)).toBe(0)
   })
 })

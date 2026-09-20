@@ -14,6 +14,8 @@
 
 ## Запуск
 
+Нужен Node.js 22.12+ (также поддерживается Node.js 20.19+).
+
 ```bash
 npm install
 npm run dev

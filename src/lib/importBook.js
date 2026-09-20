@@ -16,6 +16,7 @@ const baseMeta = (file) => ({
 export async function importBook(file) {
   const ext = file.name.split('.').pop()?.toLowerCase()
   const meta = baseMeta(file)
+  if (file.size > 50 * 1024 * 1024) throw new Error('Файл больше 50 МБ — сожмите книгу перед импортом')
   if (ext === 'pdf') return { ...meta, kind: 'pdf', blob: file, text: '' }
   if (ext === 'txt') return { ...meta, kind: 'text', text: normalizeText(await file.text()) }
   if (ext === 'fb2') {
@@ -25,14 +26,19 @@ export async function importBook(file) {
   }
   if (ext === 'epub') {
     const archive = unzipSync(new Uint8Array(await file.arrayBuffer()))
+    const expandedSize = Object.values(archive).reduce((sum, entry) => sum + entry.byteLength, 0)
+    if (Object.keys(archive).length > 3000 || expandedSize > 120 * 1024 * 1024) throw new Error('Архив EPUB слишком большой или содержит слишком много файлов')
     const container = strFromU8(archive['META-INF/container.xml'])
-    const rootPath = findText(container.replace(/full-path=/, '>').replace(/"[^>]*\/?>([\s\S]*)/, '$1'), 'x')
-      || container.match(/full-path=["']([^"']+)/)?.[1]
+    const containerDoc = new DOMParser().parseFromString(container, 'text/xml')
+    const rootPath = containerDoc.querySelector('rootfile')?.getAttribute('full-path')
     const opfPath = rootPath || Object.keys(archive).find((key) => key.endsWith('.opf'))
+    if (!opfPath || !archive[opfPath]) throw new Error('В EPUB не найден файл описания книги')
     const opf = strFromU8(archive[opfPath]); const folder = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : ''
     const doc = new DOMParser().parseFromString(opf, 'text/xml')
-    const items = [...doc.querySelectorAll('manifest item')].filter((node) => /xhtml|html/.test(node.getAttribute('media-type') || ''))
-    const chapters = items.map((node) => archive[folder + node.getAttribute('href')]).filter(Boolean).map(strFromU8)
+    const manifest = new Map([...doc.querySelectorAll('manifest item')].map((node) => [node.getAttribute('id'), node]))
+    const spine = [...doc.querySelectorAll('spine itemref')].map((node) => manifest.get(node.getAttribute('idref'))).filter(Boolean)
+    const items = spine.length ? spine : [...manifest.values()].filter((node) => /xhtml|html/.test(node.getAttribute('media-type') || ''))
+    const chapters = items.map((node) => archive[decodeURIComponent(folder + node.getAttribute('href').split('#')[0])]).filter(Boolean).map(strFromU8)
     return { ...meta, kind: 'text', title: findText(opf, 'title') || meta.title, author: findText(opf, 'creator') || meta.author, text: normalizeText(chapters.join('\n\n')) }
   }
   throw new Error('Поддерживаются EPUB, FB2, TXT и PDF')

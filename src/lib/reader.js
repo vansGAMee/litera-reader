@@ -27,19 +27,31 @@ export function readingProgress(current, total) {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)))
 }
 
+export function pageFromProgress(progress, total) {
+  if (!Number.isFinite(total) || total <= 0) return 0
+  return Math.max(0, Math.min(total - 1, Math.ceil((Math.max(0, Math.min(100, progress)) / 100) * total) - 1))
+}
+
 export function getInitials(author = '') {
   return author.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')
 }
 
 export function paginate(text, size = 1850) {
-  const words = String(text).split(/\s+/).filter(Boolean)
   const pages = []
   let page = ''
-  for (const word of words) {
-    if (page.length && page.length + word.length + 1 > size) {
+  const pushChunk = (chunk, separator = '') => {
+    if (page && page.length + separator.length + chunk.length > size) {
       pages.push(page)
-      page = word
-    } else page += `${page ? ' ' : ''}${word}`
+      page = ''
+    }
+    page += `${page ? separator : ''}${chunk}`
+  }
+  for (const paragraph of String(text).split(/\n{2,}/).map((part) => part.trim()).filter(Boolean)) {
+    if (paragraph.length <= size) {
+      pushChunk(paragraph, '\n\n')
+      continue
+    }
+    for (const word of paragraph.split(/\s+/)) pushChunk(word, ' ')
   }
   if (page) pages.push(page)
   return pages.length ? pages : ['']
