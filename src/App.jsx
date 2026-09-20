@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, Search, Settings2, StickyNote, Upload, X } from 'lucide-react'
 import { get, set } from 'idb-keyval'
 import { seedBooks } from './data.js'
-import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, readingProgress } from './lib/reader.js'
+import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, spreadProgress } from './lib/reader.js'
 import { importBook } from './lib/importBook.js'
+import { migrateStoredBooks } from './lib/migrateLibrary.js'
 
 const STORAGE_KEY = 'litera-library-v1'
 const paletteNames = ['Терракотовая', 'Прусская', 'Оливковая']
@@ -31,22 +32,21 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const [toast, setToast] = useState('')
   const [hydrated, setHydrated] = useState(false)
+  const [storageWritable, setStorageWritable] = useState(false)
   const fileRef = useRef(null)
   const searchRef = useRef(null)
 
   useEffect(() => {
     get(STORAGE_KEY).then(async (saved) => {
-      if (!Array.isArray(saved)) return
-      const migrated = await Promise.all(saved.map(async (book) => {
-        if (book.kind !== 'pdf' || !book.blob) return book
-        const file = book.blob instanceof File ? book.blob : new File([book.blob], `${book.title}.pdf`, { type: 'application/pdf' })
-        const fresh = await importBook(file)
-        return { ...book, ...fresh, id: book.id, progress: book.progress, notes: book.notes }
-      }))
+      if (!Array.isArray(saved)) { setStorageWritable(true); return }
+      const inspectPdf = async (file) => (await (await import('./lib/pdf.js')).openPdf(file)).numPages
+      const { books: migrated, failures: migrationFailures } = await migrateStoredBooks(saved, importBook, undefined, inspectPdf)
       setBooks(migrated)
+      setStorageWritable(true)
+      if (migrationFailures) setToast(`Не удалось обновить PDF: ${migrationFailures}. Оригиналы сохранены`)
     }).catch(() => setToast('Не удалось прочитать локальную библиотеку')).finally(() => setHydrated(true))
   }, [])
-  useEffect(() => { if (hydrated) set(STORAGE_KEY, books).catch(() => setToast('Не удалось сохранить изменения: проверьте место в браузере')) }, [books, hydrated])
+  useEffect(() => { if (hydrated && storageWritable) set(STORAGE_KEY, books).catch(() => setToast('Не удалось сохранить изменения: проверьте место в браузере')) }, [books, hydrated, storageWritable])
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 2600); return () => clearTimeout(id) }, [toast])
   useEffect(() => { const handler = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchRef.current?.focus() } }; addEventListener('keydown', handler); return () => removeEventListener('keydown', handler) }, [])
 
@@ -78,7 +78,7 @@ function App() {
       <button className="brand" onClick={() => setView('library')}><span className="brand-mark">Л</span><span><b>Л И Т Е Р А</b><i>личное собрание</i></span></button>
       <nav><button className="active"><Library size={16}/>Библиотека</button><button onClick={() => visible[0] && openBook(visible[0].id)}><BookOpen size={16}/>Читать</button></nav>
       <div className="top-actions"><button className="upload-button" onClick={() => fileRef.current?.click()}><Upload size={16}/><span>{uploading ? 'Обработка…' : 'Добавить книгу'}</span></button><button className="icon-button mobile"><Menu/></button></div>
-      <input ref={fileRef} hidden multiple type="file" accept=".epub,.mobi,.azw,.azw3,.fb2,.fbz,.cbz,.pdf,.docx,.rtf,.txt,.md,.html,.jpg,.jpeg,.png,.webp" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
+      <input ref={fileRef} hidden multiple type="file" accept=".epub,.mobi,.azw,.azw3,.fb2,.fb2.zip,.fbz,.cbz,.pdf,.docx,.rtf,.txt,.md,.markdown,.html,.htm,.jpg,.jpeg,.png,.webp,.gif,.avif" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
     </header>
 
     <main className="library-view" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}>
@@ -128,8 +128,9 @@ function Reader({ book, onBack, onChange }) {
   const [page, setPage] = useState(() => pageFromProgress(book.progress || 0, pages.length))
   const [mobile, setMobile] = useState(() => matchMedia('(max-width: 760px)').matches)
   const current = Math.min(page, Math.max(0, pages.length - 1))
-  const pct = readingProgress(current + 1, pages.length)
-  const remaining = isVisual ? Math.max(0, pages.length - current - 1) : estimateMinutes(pages.slice(current + 1).join(' '))
+  const pct = spreadProgress(current, pages.length, mobile)
+  const visibleEnd = Math.min(current + (mobile ? 1 : 2), pages.length)
+  const remaining = isVisual ? Math.max(0, pages.length - visibleEnd) : estimateMinutes(pages.slice(visibleEnd).join(' '))
 
   useEffect(() => { localStorage.setItem('litera-font', fontSize); localStorage.setItem('litera-theme', theme) }, [fontSize, theme])
   useEffect(() => { const media = matchMedia('(max-width: 760px)'); const update = () => setMobile(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update) }, [])
@@ -143,7 +144,7 @@ function Reader({ book, onBack, onChange }) {
   }, [panel])
   const closePanel = () => { setPanel(null); setTimeout(() => panelOpener.current?.focus(), 0) }
   const openPanel = (name, event) => { panelOpener.current = event.currentTarget; setPanel(panel === name ? null : name) }
-  const movePage = (delta) => setPage((value) => { const next = Math.max(0, Math.min(value + delta, pages.length - 1)); locationRef.current = readingProgress(next + 1, pages.length); return next })
+  const movePage = (delta) => setPage((value) => { const next = Math.max(0, Math.min(value + delta, pages.length - 1)); locationRef.current = spreadProgress(next, pages.length, mobile); return next })
   useEffect(() => {
     const keys = (e) => {
       if (e.key === 'Escape' && panel) { closePanel(); return }
@@ -211,13 +212,20 @@ function ImagePage({ file }) {
 function PdfCanvas({ file, number }) {
   const wrapRef = useRef(null); const canvasRef = useRef(null)
   const [error, setError] = useState('')
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    if (!wrapRef.current) return
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
+    observer.observe(wrapRef.current)
+    return () => observer.disconnect()
+  }, [])
   useEffect(() => {
     let cancelled = false; let task
     const render = async () => {
       try {
         if (!pdfDocuments.has(file)) pdfDocuments.set(file, import('./lib/pdf.js').then(({ openPdf }) => openPdf(file)))
         const pdf = await pdfDocuments.get(file); const pdfPage = await pdf.getPage(number)
-        const base = pdfPage.getViewport({ scale: 1 }); const available = Math.max(260, wrapRef.current.clientWidth)
+        const base = pdfPage.getViewport({ scale: 1 }); const available = Math.max(260, width || wrapRef.current.clientWidth)
         const scale = available / base.width; const viewport = pdfPage.getViewport({ scale })
         const ratio = Math.min(devicePixelRatio || 1, 2); const canvas = canvasRef.current; const context = canvas.getContext('2d')
         canvas.width = Math.floor(viewport.width * ratio); canvas.height = Math.floor(viewport.height * ratio)
@@ -227,7 +235,7 @@ function PdfCanvas({ file, number }) {
       } catch (reason) { if (!cancelled && reason?.name !== 'RenderingCancelledException') setError('Не удалось отрисовать страницу') }
     }
     render(); return () => { cancelled = true; task?.cancel() }
-  }, [file, number])
+  }, [file, number, width])
   return <div ref={wrapRef} className="visual-content pdf-canvas">{error ? <p>{error}</p> : <canvas ref={canvasRef}/>}</div>
 }
 

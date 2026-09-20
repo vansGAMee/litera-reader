@@ -1,5 +1,6 @@
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist/build/pdf.mjs'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { needsVisualPdf } from './reader.js'
 
 GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -20,7 +21,7 @@ export async function extractPdf(file) {
   for (let number = 1; number <= pdf.numPages; number++) pages.push(await pageText(await pdf.getPage(number)))
   const text = pages.join('\n\n').trim()
   return {
-    text: text.length > 40 ? text : '',
+    text: !needsVisualPdf(pages) && text.length > 40 ? text : '',
     title: metadata.info?.Title || '', author: metadata.info?.Author || '', pageCount: pdf.numPages,
   }
 }

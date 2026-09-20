@@ -47,6 +47,14 @@ export function readingProgress(current, total) {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)))
 }
 
+export function spreadProgress(current, total, mobile) {
+  return readingProgress(Math.min(current + (mobile ? 1 : 2), total), total)
+}
+
+export function needsVisualPdf(pageTexts = []) {
+  return !pageTexts.length || pageTexts.some((text) => String(text).trim().length < 20)
+}
+
 export function pageFromProgress(progress, total) {
   if (!Number.isFinite(total) || total <= 0) return 0
   return Math.max(0, Math.min(total - 1, Math.ceil((Math.max(0, Math.min(100, progress)) / 100) * total) - 1))

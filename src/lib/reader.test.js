@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, readingProgress, repairMojibake } from './reader.js'
+import { estimateMinutes, getInitials, needsVisualPdf, normalizeText, pageFromProgress, paginate, readingProgress, repairMojibake, spreadProgress } from './reader.js'
 
 describe('reader utilities', () => {
   it('normalizes FB2-like text into readable paragraphs', () => {
@@ -14,6 +14,17 @@ describe('reader utilities', () => {
   it('calculates safe progress', () => {
     expect(readingProgress(50, 200)).toBe(25)
     expect(readingProgress(0, 0)).toBe(0)
+  })
+
+  it('counts every visible page in a desktop spread', () => {
+    expect(spreadProgress(0, 4, false)).toBe(50)
+    expect(spreadProgress(2, 4, false)).toBe(100)
+    expect(spreadProgress(0, 4, true)).toBe(25)
+  })
+
+  it('keeps mixed and scanned PDFs in visual mode', () => {
+    expect(needsVisualPdf(['enough readable text on this page', ''])).toBe(true)
+    expect(needsVisualPdf(['first readable page with content', 'second readable page with content'])).toBe(false)
   })
 
   it('builds a two-letter monogram from an author', () => {

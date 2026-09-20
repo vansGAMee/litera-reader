@@ -14,7 +14,7 @@
     "@fontsource/oswald": "^5.3.0",
     "@fontsource/space-grotesk": "^5.3.0",
     "@vitejs/plugin-react": "latest",
-    "fflate": "latest",
+    "@zip.js/zip.js": "^2.16.0",
     "foliate-js": "^1.0.1",
     "idb-keyval": "latest",
     "lucide-react": "latest",
