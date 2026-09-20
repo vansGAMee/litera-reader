@@ -33,7 +33,7 @@ function App() {
   const fileRef = useRef(null)
   const searchRef = useRef(null)
 
-  useEffect(() => { get(STORAGE_KEY).then((saved) => { if (saved?.length) setBooks(saved) }).catch(() => setToast('Не удалось прочитать локальную библиотеку')).finally(() => setHydrated(true)) }, [])
+  useEffect(() => { get(STORAGE_KEY).then((saved) => { if (Array.isArray(saved)) setBooks(saved) }).catch(() => setToast('Не удалось прочитать локальную библиотеку')).finally(() => setHydrated(true)) }, [])
   useEffect(() => { if (hydrated) set(STORAGE_KEY, books).catch(() => setToast('Не удалось сохранить изменения: проверьте место в браузере')) }, [books, hydrated])
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 2600); return () => clearTimeout(id) }, [toast])
   useEffect(() => { const handler = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchRef.current?.focus() } }; addEventListener('keydown', handler); return () => removeEventListener('keydown', handler) }, [])
@@ -42,6 +42,8 @@ function App() {
     const matches = `${book.title} ${book.author}`.toLowerCase().includes(query.toLowerCase())
     return matches && (filter === 'all' || (filter === 'reading' && book.progress > 0 && book.progress < 100) || (filter === 'favorite' && book.favorite))
   }).sort((a, b) => sort === 'author' ? a.author.localeCompare(b.author, 'ru') : sort === 'title' ? a.title.localeCompare(b.title, 'ru') : b.progress - a.progress), [books, query, filter, sort])
+
+  if (!hydrated) return <div className="loading-screen"><span className="brand-mark">Л</span><p>Расставляем книги на полке…</p></div>
 
   const openBook = (id) => { setActiveId(id); setView('reader'); window.scrollTo(0, 0) }
   const patchBook = (id, patch) => setBooks((all) => all.map((book) => book.id === id ? { ...book, ...patch } : book))
@@ -100,6 +102,10 @@ function Reader({ book, onBack, onChange }) {
   const [focus, setFocus] = useState(false)
   const [notes, setNotes] = useState(book.notes || [])
   const [selected, setSelected] = useState('')
+  const locationRef = useRef(book.progress || 0)
+  const skipInitialPersist = useRef(true)
+  const panelRef = useRef(null)
+  const panelOpener = useRef(null)
   const pageSize = fontSize >= 22 ? 1150 : fontSize <= 17 ? 2000 : 1550
   const pages = useMemo(() => paginate(book.text || '', pageSize), [book.text, pageSize])
   const [page, setPage] = useState(() => pageFromProgress(book.progress || 0, pages.length))
@@ -113,13 +119,23 @@ function Reader({ book, onBack, onChange }) {
   useEffect(() => () => blobUrl && URL.revokeObjectURL(blobUrl), [blobUrl])
   useEffect(() => { localStorage.setItem('litera-font', fontSize); localStorage.setItem('litera-theme', theme) }, [fontSize, theme])
   useEffect(() => { const media = matchMedia('(max-width: 760px)'); const update = () => setMobile(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update) }, [])
-  useEffect(() => { if (!isPdf) onChange(book.id, { progress: pct, notes }) }, [current, notes, isPdf])
+  useEffect(() => { setPage(pageFromProgress(locationRef.current, pages.length)) }, [pages.length])
+  useEffect(() => { if (skipInitialPersist.current) { skipInitialPersist.current = false; return } if (!isPdf) onChange(book.id, { progress: pct, notes }) }, [current, notes, isPdf])
+  useEffect(() => {
+    if (!panel) return
+    const dialog = panelRef.current; const focusable = () => [...dialog.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+    const trap = (e) => { if (e.key !== 'Tab') return; const items = focusable(); if (!items.length) return; const first = items[0]; const last = items.at(-1); if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() } }
+    dialog.addEventListener('keydown', trap); return () => dialog.removeEventListener('keydown', trap)
+  }, [panel])
+  const closePanel = () => { setPanel(null); setTimeout(() => panelOpener.current?.focus(), 0) }
+  const openPanel = (name, event) => { panelOpener.current = event.currentTarget; setPanel(panel === name ? null : name) }
+  const movePage = (delta) => setPage((value) => { const next = Math.max(0, Math.min(value + delta, pages.length - 1)); locationRef.current = readingProgress(next + 1, pages.length); return next })
   useEffect(() => {
     const keys = (e) => {
-      if (['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) return
+      if (['INPUT','TEXTAREA','BUTTON','A','SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return
       const step = mobile ? 1 : 2
-      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); setPage(p => Math.min(p + step, pages.length - 1)) }
-      if (e.key === 'ArrowLeft') setPage(p => Math.max(0, p - step))
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); movePage(step) }
+      if (e.key === 'ArrowLeft') movePage(-step)
       if (e.key.toLowerCase() === 'f') setFocus(v => !v)
       if (e.key === 'Escape') setPanel(null)
     }
@@ -134,21 +150,21 @@ function Reader({ book, onBack, onChange }) {
       <button className="reader-brand" onClick={onBack}><span>Л</span><i>ЛИТЕРА</i></button>
       <button className="back" onClick={onBack}><ArrowLeft size={17}/> Библиотека</button>
       <div className="reader-title"><b>{book.title}</b><span>{book.author}</span></div>
-      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={() => setPanel(panel === 'notes' ? null : 'notes')}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={() => setPanel(panel === 'settings' ? null : 'settings')}><Settings2 size={18}/></button></div>
+      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
     </header>
-    <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> {remaining ? `≈ ${remaining} мин до конца` : 'последняя страница'}</span></div>
+    <div className={`reader-status ${isPdf ? 'pdf-status' : ''}`}><span>{isPdf ? <b>PDF</b> : <><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</>}</span><div><i style={{ width: isPdf ? '0' : `${pct}%` }}/></div><span><Clock3 size={14}/> {isPdf ? 'страницы — в панели PDF' : remaining ? `≈ ${remaining} мин до конца` : 'последняя страница'}</span></div>
 
     <main className="reading-desk">
       {isPdf ? <iframe className="pdf-view" src={blobUrl} title={book.title}/> : <div className="spread" onMouseUp={captureSelection}>
         <div className="paper page-left"><div className="running"><span>{book.author}</span><em>ЛИТЕРА · ЛИЧНОЕ СОБРАНИЕ</em></div><PageText text={pages[current]} first={current === 0}/><div className="folio"><span>{current + 1}</span><i>{book.title}</i></div></div>
         <div className="paper page-right"><div className="bookmark-ribbon"/><div className="running"><em>ЭКСКЛЮЗИВНАЯ КЛАССИКА</em><span>{book.title}</span></div><PageText text={pages[current + 1] || ''}/><div className="folio"><i>{book.author}</i><span>{Math.min(current + 2, pages.length)}</span></div></div>
       </div>}
-      {!isPdf && <><button aria-label="Предыдущая страница" className="page-nav prev" disabled={current === 0} onClick={() => setPage(p => Math.max(0, p - (mobile ? 1 : 2)))}><ArrowLeft/></button><button aria-label="Следующая страница" className="page-nav next" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => setPage(p => Math.min(p + (mobile ? 1 : 2), pages.length - 1))}><ArrowRight/></button></>}
+      {!isPdf && <><button aria-label="Предыдущая страница" className="page-nav prev" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button><button aria-label="Следующая страница" className="page-nav next" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => movePage(mobile ? 1 : 2)}><ArrowRight/></button></>}
       {selected && <button className="selection-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}><Highlighter size={15}/> Сохранить цитату</button>}
     </main>
     <footer className="reader-bottom"><span><i className="live"/> Режим чтения</span><span>Шрифт: EB Garamond · {fontSize}px</span><button onClick={() => setPanel('notes')}><Bookmark size={15}/> Заметки и цитаты · {notes.length}</button><span className="shortcuts">← → листать · F фокус</span></footer>
 
-    {panel && <div className="panel-backdrop" onClick={() => setPanel(null)}><aside className="side-panel" role="dialog" aria-modal="true" aria-label={panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'} onClick={(e) => e.stopPropagation()}><div className="panel-head"><div><small>{panel === 'settings' ? 'ВИД ИЗДАНИЯ' : 'ПОЛЯ ЧИТАТЕЛЯ'}</small><h2>{panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'}</h2></div><button aria-label="Закрыть" autoFocus onClick={() => setPanel(null)}><X/></button></div>
+    {panel && <div className="panel-backdrop" onClick={closePanel}><aside ref={panelRef} className="side-panel" role="dialog" aria-modal="true" aria-label={panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'} onClick={(e) => e.stopPropagation()}><div className="panel-head"><div><small>{panel === 'settings' ? 'ВИД ИЗДАНИЯ' : 'ПОЛЯ ЧИТАТЕЛЯ'}</small><h2>{panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'}</h2></div><button aria-label="Закрыть" autoFocus onClick={closePanel}><X/></button></div>
       {panel === 'settings' ? <div className="settings-list"><section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section><section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section><section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section></div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
     </aside></div>}
   </div>

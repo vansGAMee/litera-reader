@@ -13,6 +13,17 @@ const baseMeta = (file) => ({
   progress: 0, favorite: false,
 })
 
+export function resolveArchivePath(base, href) {
+  const parts = `${base}${decodeURIComponent(href).split('#')[0]}`.split('/')
+  const resolved = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') resolved.pop()
+    else resolved.push(part)
+  }
+  return resolved.join('/')
+}
+
 export async function importBook(file) {
   const ext = file.name.split('.').pop()?.toLowerCase()
   const meta = baseMeta(file)
@@ -38,7 +49,7 @@ export async function importBook(file) {
     const manifest = new Map([...doc.querySelectorAll('manifest item')].map((node) => [node.getAttribute('id'), node]))
     const spine = [...doc.querySelectorAll('spine itemref')].map((node) => manifest.get(node.getAttribute('idref'))).filter(Boolean)
     const items = spine.length ? spine : [...manifest.values()].filter((node) => /xhtml|html/.test(node.getAttribute('media-type') || ''))
-    const chapters = items.map((node) => archive[decodeURIComponent(folder + node.getAttribute('href').split('#')[0])]).filter(Boolean).map(strFromU8)
+    const chapters = items.map((node) => archive[resolveArchivePath(folder, node.getAttribute('href'))]).filter(Boolean).map(strFromU8)
     return { ...meta, kind: 'text', title: findText(opf, 'title') || meta.title, author: findText(opf, 'creator') || meta.author, text: normalizeText(chapters.join('\n\n')) }
   }
   throw new Error('Поддерживаются EPUB, FB2, TXT и PDF')
