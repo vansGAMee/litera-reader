@@ -9,5 +9,5 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 /* Never clip a page when viewport height, font metrics, or user font size differ. */
-.paper{overflow-y:auto;scrollbar-width:none}.paper::-webkit-scrollbar{display:none}.page-content{overflow:visible}
+.paper{overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(110,95,72,.35) transparent}.paper::-webkit-scrollbar{display:block;width:4px}.paper::-webkit-scrollbar-thumb{background:rgba(110,95,72,.35)}.page-content{overflow:visible}
 @media(max-width:390px){.book-info button{display:block}}

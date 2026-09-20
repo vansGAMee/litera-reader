@@ -132,15 +132,16 @@ function Reader({ book, onBack, onChange }) {
   const movePage = (delta) => setPage((value) => { const next = Math.max(0, Math.min(value + delta, pages.length - 1)); locationRef.current = readingProgress(next + 1, pages.length); return next })
   useEffect(() => {
     const keys = (e) => {
+      if (e.key === 'Escape' && panel) { closePanel(); return }
       if (['INPUT','TEXTAREA','BUTTON','A','SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return
       const step = mobile ? 1 : 2
       if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); movePage(step) }
       if (e.key === 'ArrowLeft') movePage(-step)
       if (e.key.toLowerCase() === 'f') setFocus(v => !v)
-      if (e.key === 'Escape') setPanel(null)
     }
     addEventListener('keydown', keys); return () => removeEventListener('keydown', keys)
-  }, [pages.length, mobile])
+  }, [pages.length, mobile, panel])
+  useEffect(() => { document.querySelectorAll('.paper').forEach((paper) => paper.scrollTo({ top: 0 })) }, [current])
 
   const captureSelection = () => { const text = window.getSelection()?.toString().trim(); if (text) setSelected(text) }
   const addNote = () => { if (!selected) return; const note = prompt('Заметка к цитате (можно оставить пустой):') ?? ''; setNotes((all) => [{ id: Date.now(), quote: selected, note, page: current + 1 }, ...all]); setSelected(''); window.getSelection()?.removeAllRanges() }
@@ -162,7 +163,7 @@ function Reader({ book, onBack, onChange }) {
       {!isPdf && <><button aria-label="Предыдущая страница" className="page-nav prev" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button><button aria-label="Следующая страница" className="page-nav next" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => movePage(mobile ? 1 : 2)}><ArrowRight/></button></>}
       {selected && <button className="selection-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}><Highlighter size={15}/> Сохранить цитату</button>}
     </main>
-    <footer className="reader-bottom"><span><i className="live"/> Режим чтения</span><span>Шрифт: EB Garamond · {fontSize}px</span><button onClick={() => setPanel('notes')}><Bookmark size={15}/> Заметки и цитаты · {notes.length}</button><span className="shortcuts">← → листать · F фокус</span></footer>
+    <footer className="reader-bottom"><span><i className="live"/> Режим чтения</span><span>Шрифт: EB Garamond · {fontSize}px</span><button onClick={(e) => openPanel('notes', e)}><Bookmark size={15}/> Заметки и цитаты · {notes.length}</button><span className="shortcuts">← → листать · F фокус</span></footer>
 
     {panel && <div className="panel-backdrop" onClick={closePanel}><aside ref={panelRef} className="side-panel" role="dialog" aria-modal="true" aria-label={panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'} onClick={(e) => e.stopPropagation()}><div className="panel-head"><div><small>{panel === 'settings' ? 'ВИД ИЗДАНИЯ' : 'ПОЛЯ ЧИТАТЕЛЯ'}</small><h2>{panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'}</h2></div><button aria-label="Закрыть" autoFocus onClick={closePanel}><X/></button></div>
       {panel === 'settings' ? <div className="settings-list"><section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section><section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section><section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section></div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
