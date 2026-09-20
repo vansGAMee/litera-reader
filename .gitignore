@@ -1,0 +1,7 @@
+node_modules
+dist
+.vercel
+*.log
+.DS_Store
+stitch_digital_publishing_book_reader_ui/
+stitch_digital_publishing_book_reader_ui.zip
