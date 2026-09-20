@@ -34,11 +34,21 @@ const baseMeta = (file) => ({
   progress: 0, favorite: false, sourceFormat: extensionOf(file.name).toUpperCase(),
 })
 
-const structuredText = (doc) => {
+export const structuredText = (doc) => {
   const root = doc.body || doc.documentElement
-  const blocks = [...root.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,pre')]
-    .map((node) => node.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean)
-  return normalizeText(blocks.length ? blocks.join('\n\n') : root.textContent)
+  const blocks = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'DT', 'DD', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'P', 'PRE', 'SECTION', 'TABLE', 'TR'])
+  const ignored = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'OBJECT', 'EMBED', 'IFRAME', 'FORM', 'NAV'])
+  const parts = []
+  const walk = (node) => {
+    if (node.nodeType === 3) { parts.push(node.nodeValue || ''); return }
+    if (node.nodeType !== 1 || ignored.has(node.tagName)) return
+    const isBlock = blocks.has(node.tagName)
+    if (isBlock || node.tagName === 'BR') parts.push('\n\n')
+    for (const child of node.childNodes) walk(child)
+    if (isBlock) parts.push('\n\n')
+  }
+  walk(root)
+  return normalizeText(parts.join(''))
 }
 
 const decodeText = async (file) => {
@@ -171,7 +181,7 @@ export async function importBook(file) {
   const meta = baseMeta(file)
   const ext = extensionOf(file.name)
 
-  if (['epub', 'fbz', 'fb2.zip'].includes(ext)) await validateZipArchive(file)
+  if (['epub', 'fbz', 'fb2.zip', 'docx'].includes(ext)) await validateZipArchive(file)
 
   if (family === 'pdf') {
     const { extractPdf } = await import('./pdf.js')

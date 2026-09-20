@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyFormat, parseRtfBytes, parseRtfText, resolveArchivePath } from './importBook.js'
+import { classifyFormat, parseRtfBytes, parseRtfText, resolveArchivePath, structuredText } from './importBook.js'
 
 describe('EPUB paths', () => {
   it('resolves parent segments relative to the OPF folder', () => {
@@ -42,5 +42,20 @@ describe('RTF normalization', () => {
     const prefix = new TextEncoder().encode(String.raw`{\rtf1\ansi\ansicpg1252 caf`)
     const bytes = Uint8Array.from([...prefix, 0xe9, 0x7d])
     expect(parseRtfBytes(bytes)).toBe('café')
+  })
+})
+
+describe('structured document normalization', () => {
+  const text = (nodeValue) => ({ nodeType: 3, nodeValue })
+  const element = (tagName, ...childNodes) => ({ nodeType: 1, tagName, childNodes })
+
+  it('keeps loose text once while dropping executable and style content', () => {
+    const body = element('BODY',
+      element('DIV', text('Loose text')),
+      element('LI', element('P', text('Nested item'))),
+      element('SCRIPT', text('alert("leak")')),
+      element('STYLE', text('.leak{}')),
+    )
+    expect(structuredText({ body })).toBe('Loose text\n\nNested item')
   })
 })
