@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, readingProgress } from './reader.js'
+import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, readingProgress, repairMojibake } from './reader.js'
 
 describe('reader utilities', () => {
   it('normalizes FB2-like text into readable paragraphs', () => {
@@ -30,5 +30,10 @@ describe('reader utilities', () => {
     expect(pageFromProgress(50, 20)).toBe(9)
     expect(pageFromProgress(100, 20)).toBe(19)
     expect(pageFromProgress(30, 0)).toBe(0)
+  })
+
+  it('repairs UTF-8 text decoded as Windows-1252', () => {
+    expect(repairMojibake('Nietzscheâ€™s â€œgoodâ€ book')).toBe('Nietzsche’s “good” book')
+    expect(repairMojibake('Нормальный русский текст')).toBe('Нормальный русский текст')
   })
 })

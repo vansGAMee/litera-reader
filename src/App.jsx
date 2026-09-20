@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, Search, Settings2, StickyNote, Upload, X } from 'lucide-react'
 import { get, set } from 'idb-keyval'
 import { seedBooks } from './data.js'
-import { estimateMinutes, getInitials, pageFromProgress, paginate, readingProgress } from './lib/reader.js'
+import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, readingProgress } from './lib/reader.js'
 import { importBook } from './lib/importBook.js'
 
 const STORAGE_KEY = 'litera-library-v1'
 const paletteNames = ['Терракотовая', 'Прусская', 'Оливковая']
+const pdfDocuments = new WeakMap()
 
 function Cover({ book, onClick, compact = false }) {
   const [main, accent, ink] = book.palette
@@ -33,7 +34,18 @@ function App() {
   const fileRef = useRef(null)
   const searchRef = useRef(null)
 
-  useEffect(() => { get(STORAGE_KEY).then((saved) => { if (Array.isArray(saved)) setBooks(saved) }).catch(() => setToast('Не удалось прочитать локальную библиотеку')).finally(() => setHydrated(true)) }, [])
+  useEffect(() => {
+    get(STORAGE_KEY).then(async (saved) => {
+      if (!Array.isArray(saved)) return
+      const migrated = await Promise.all(saved.map(async (book) => {
+        if (book.kind !== 'pdf' || !book.blob) return book
+        const file = book.blob instanceof File ? book.blob : new File([book.blob], `${book.title}.pdf`, { type: 'application/pdf' })
+        const fresh = await importBook(file)
+        return { ...book, ...fresh, id: book.id, progress: book.progress, notes: book.notes }
+      }))
+      setBooks(migrated)
+    }).catch(() => setToast('Не удалось прочитать локальную библиотеку')).finally(() => setHydrated(true))
+  }, [])
   useEffect(() => { if (hydrated) set(STORAGE_KEY, books).catch(() => setToast('Не удалось сохранить изменения: проверьте место в браузере')) }, [books, hydrated])
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 2600); return () => clearTimeout(id) }, [toast])
   useEffect(() => { const handler = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchRef.current?.focus() } }; addEventListener('keydown', handler); return () => removeEventListener('keydown', handler) }, [])
@@ -49,11 +61,14 @@ function App() {
   const patchBook = (id, patch) => setBooks((all) => all.map((book) => book.id === id ? { ...book, ...patch } : book))
   const handleFiles = async (files) => {
     setUploading(true)
-    try {
-      const imported = []
-      for (const file of [...files]) imported.push(await importBook(file))
-      setBooks((current) => [...imported, ...current]); setToast(`Добавлено книг: ${imported.length}`)
-    } catch (error) { setToast(error.message) } finally { setUploading(false) }
+    const imported = []; const errors = []
+    for (const file of [...files]) {
+      try { imported.push(await importBook(file)) }
+      catch (error) { errors.push(`${file.name}: ${error.message}`) }
+    }
+    if (imported.length) setBooks((current) => [...imported, ...current])
+    setToast(errors.length ? `${imported.length} добавлено · ${errors[0]}` : `Добавлено книг: ${imported.length}`)
+    setUploading(false)
   }
 
   if (view === 'reader') return <Reader book={books.find((book) => book.id === activeId) || books[0]} onBack={() => setView('library')} onChange={patchBook} />
@@ -63,7 +78,7 @@ function App() {
       <button className="brand" onClick={() => setView('library')}><span className="brand-mark">Л</span><span><b>Л И Т Е Р А</b><i>личное собрание</i></span></button>
       <nav><button className="active"><Library size={16}/>Библиотека</button><button onClick={() => visible[0] && openBook(visible[0].id)}><BookOpen size={16}/>Читать</button></nav>
       <div className="top-actions"><button className="upload-button" onClick={() => fileRef.current?.click()}><Upload size={16}/><span>{uploading ? 'Обработка…' : 'Добавить книгу'}</span></button><button className="icon-button mobile"><Menu/></button></div>
-      <input ref={fileRef} hidden multiple type="file" accept=".epub,.fb2,.txt,.pdf" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
+      <input ref={fileRef} hidden multiple type="file" accept=".epub,.mobi,.azw,.azw3,.fb2,.fbz,.cbz,.pdf,.docx,.rtf,.txt,.md,.html,.jpg,.jpeg,.png,.webp" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
     </header>
 
     <main className="library-view" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}>
@@ -88,7 +103,7 @@ function App() {
         <div className="progress-row"><span><i style={{ width: `${book.progress}%` }}/></span><small>{book.progress ? `${book.progress}%` : 'Не начато'}</small></div>
       </article>)}</div> : <div className="empty"><span>∅</span><h3>На этой полке пока пусто</h3><p>Измените фильтр или добавьте свою книгу.</p></div>}
 
-      <button className="dropzone" onClick={() => fileRef.current?.click()}><Upload/><span><b>Пополнить собрание</b><small>Перетащите EPUB, FB2, TXT или PDF · файлы не покидают устройство</small></span><strong>Выбрать файл</strong></button>
+      <button className="dropzone" onClick={() => fileRef.current?.click()}><Upload/><span><b>Пополнить собрание</b><small>EPUB · MOBI · AZW3 · FB2 · PDF · DOCX · RTF · TXT · MD · HTML · CBZ · изображения</small></span><strong>Выбрать файл</strong></button>
     </main>
     <footer><span>ЛИТЕРА / ЦИФРОВОЕ СОБРАНИЕ</span><i>Частное чтение. Без подписки.</i><span>Все данные хранятся локально</span></footer>
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
@@ -107,20 +122,19 @@ function Reader({ book, onBack, onChange }) {
   const panelRef = useRef(null)
   const panelOpener = useRef(null)
   const pageSize = fontSize >= 22 ? 1150 : fontSize <= 17 ? 2000 : 1550
-  const pages = useMemo(() => paginate(book.text || '', pageSize), [book.text, pageSize])
+  const isVisual = book.kind === 'visual'
+  const visualCount = book.sourceFormat === 'PDF' ? book.pageCount : book.pages?.length
+  const pages = useMemo(() => isVisual ? Array.from({ length: visualCount || 1 }, () => '') : paginate(normalizeText(book.text || ''), pageSize), [book.text, pageSize, isVisual, visualCount])
   const [page, setPage] = useState(() => pageFromProgress(book.progress || 0, pages.length))
   const [mobile, setMobile] = useState(() => matchMedia('(max-width: 760px)').matches)
-  const isPdf = book.kind === 'pdf'
   const current = Math.min(page, Math.max(0, pages.length - 1))
-  const pct = isPdf ? (book.progress || 0) : readingProgress(current + 1, pages.length)
-  const remaining = estimateMinutes(pages.slice(current + 1).join(' '))
-  const blobUrl = useMemo(() => book.blob ? URL.createObjectURL(book.blob) : null, [book.blob])
+  const pct = readingProgress(current + 1, pages.length)
+  const remaining = isVisual ? Math.max(0, pages.length - current - 1) : estimateMinutes(pages.slice(current + 1).join(' '))
 
-  useEffect(() => () => blobUrl && URL.revokeObjectURL(blobUrl), [blobUrl])
   useEffect(() => { localStorage.setItem('litera-font', fontSize); localStorage.setItem('litera-theme', theme) }, [fontSize, theme])
   useEffect(() => { const media = matchMedia('(max-width: 760px)'); const update = () => setMobile(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update) }, [])
   useEffect(() => { setPage(pageFromProgress(locationRef.current, pages.length)) }, [pages.length])
-  useEffect(() => { if (skipInitialPersist.current) { skipInitialPersist.current = false; return } if (!isPdf) onChange(book.id, { progress: pct, notes }) }, [current, notes, isPdf])
+  useEffect(() => { if (skipInitialPersist.current) { skipInitialPersist.current = false; return } onChange(book.id, { progress: pct, notes }) }, [current, notes])
   useEffect(() => {
     if (!panel) return
     const dialog = panelRef.current; const focusable = () => [...dialog.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
@@ -153,15 +167,15 @@ function Reader({ book, onBack, onChange }) {
       <div className="reader-title"><b>{book.title}</b><span>{book.author}</span></div>
       <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
     </header>
-    <div className={`reader-status ${isPdf ? 'pdf-status' : ''}`}><span>{isPdf ? <b>PDF</b> : <><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</>}</span><div><i style={{ width: isPdf ? '0' : `${pct}%` }}/></div><span><Clock3 size={14}/> {isPdf ? 'страницы — в панели PDF' : remaining ? `≈ ${remaining} мин до конца` : 'последняя страница'}</span></div>
+    <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> {remaining ? isVisual ? `${remaining} стр. до конца` : `≈ ${remaining} мин до конца` : 'последняя страница'}</span></div>
 
     <main className="reading-desk">
-      {isPdf ? <iframe className="pdf-view" src={blobUrl} title={book.title}/> : <div className="spread" onMouseUp={captureSelection}>
+      {isVisual ? <VisualSpread book={book} current={current} /> : <div className="spread" onMouseUp={captureSelection}>
         <div className="paper page-left"><div className="running"><span>{book.author}</span><em>ЛИТЕРА · ЛИЧНОЕ СОБРАНИЕ</em></div><PageText text={pages[current]} first={current === 0}/><div className="folio"><span>{current + 1}</span><i>{book.title}</i></div></div>
         <div className="paper page-right"><div className="bookmark-ribbon"/><div className="running"><em>ЭКСКЛЮЗИВНАЯ КЛАССИКА</em><span>{book.title}</span></div><PageText text={pages[current + 1] || ''}/><div className="folio"><i>{book.author}</i><span>{Math.min(current + 2, pages.length)}</span></div></div>
       </div>}
-      {!isPdf && <><button aria-label="Предыдущая страница" className="page-nav prev" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button><button aria-label="Следующая страница" className="page-nav next" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => movePage(mobile ? 1 : 2)}><ArrowRight/></button></>}
-      {selected && <button className="selection-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}><Highlighter size={15}/> Сохранить цитату</button>}
+      <><button aria-label="Предыдущая страница" className="page-nav prev" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button><button aria-label="Следующая страница" className="page-nav next" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => movePage(mobile ? 1 : 2)}><ArrowRight/></button></>
+      {!isVisual && selected && <button className="selection-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}><Highlighter size={15}/> Сохранить цитату</button>}
     </main>
     <footer className="reader-bottom"><span><i className="live"/> Режим чтения</span><span>Шрифт: EB Garamond · {fontSize}px</span><button onClick={(e) => openPanel('notes', e)}><Bookmark size={15}/> Заметки и цитаты · {notes.length}</button><span className="shortcuts">← → листать · F фокус</span></footer>
 
@@ -175,6 +189,46 @@ function PageText({ text, first }) {
   const blocks = text.split(/\n{2,}/).filter(Boolean)
   const heading = first && blocks[0]?.length <= 80 ? blocks.shift() : null
   return <div className="page-content">{first && <div className="chapter"><small>КНИГА ПЕРВАЯ</small><h1>{heading || 'Начало'}</h1><span/></div>}{blocks.map((p,i) => <p key={i}>{p}</p>)}</div>
+}
+
+function VisualSpread({ book, current }) {
+  const isPdf = book.sourceFormat === 'PDF'
+  const page = (index) => isPdf
+    ? <PdfCanvas file={book.pages[0]} number={index + 1}/>
+    : <ImagePage file={book.pages[index]}/>
+  return <div className="spread visual-spread">
+    <div className="paper page-left visual-paper"><div className="running"><span>{book.author}</span><em>{book.sourceFormat} · ЛИТЕРА</em></div>{page(current)}<div className="folio"><span>{current + 1}</span><i>{book.title}</i></div></div>
+    <div className="paper page-right visual-paper"><div className="bookmark-ribbon"/><div className="running"><em>ЭКСКЛЮЗИВНАЯ КЛАССИКА</em><span>{book.title}</span></div>{current + 1 < (isPdf ? book.pageCount : book.pages.length) ? page(current + 1) : <div className="end-mark">КОНЕЦ</div>}<div className="folio"><i>{book.author}</i><span>{Math.min(current + 2, isPdf ? book.pageCount : book.pages.length)}</span></div></div>
+  </div>
+}
+
+function ImagePage({ file }) {
+  const url = useMemo(() => file ? URL.createObjectURL(file) : '', [file])
+  useEffect(() => () => url && URL.revokeObjectURL(url), [url])
+  return <div className="visual-content">{url && <img src={url} alt="Страница книги"/>}</div>
+}
+
+function PdfCanvas({ file, number }) {
+  const wrapRef = useRef(null); const canvasRef = useRef(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false; let task
+    const render = async () => {
+      try {
+        if (!pdfDocuments.has(file)) pdfDocuments.set(file, import('./lib/pdf.js').then(({ openPdf }) => openPdf(file)))
+        const pdf = await pdfDocuments.get(file); const pdfPage = await pdf.getPage(number)
+        const base = pdfPage.getViewport({ scale: 1 }); const available = Math.max(260, wrapRef.current.clientWidth)
+        const scale = available / base.width; const viewport = pdfPage.getViewport({ scale })
+        const ratio = Math.min(devicePixelRatio || 1, 2); const canvas = canvasRef.current; const context = canvas.getContext('2d')
+        canvas.width = Math.floor(viewport.width * ratio); canvas.height = Math.floor(viewport.height * ratio)
+        canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`
+        task = pdfPage.render({ canvasContext: context, viewport, transform: ratio === 1 ? null : [ratio,0,0,ratio,0,0] })
+        await task.promise
+      } catch (reason) { if (!cancelled && reason?.name !== 'RenderingCancelledException') setError('Не удалось отрисовать страницу') }
+    }
+    render(); return () => { cancelled = true; task?.cancel() }
+  }, [file, number])
+  return <div ref={wrapRef} className="visual-content pdf-canvas">{error ? <p>{error}</p> : <canvas ref={canvasRef}/>}</div>
 }
 
 export default App
