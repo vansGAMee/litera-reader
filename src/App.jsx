@@ -13,10 +13,12 @@ const pdfDocuments = new WeakMap()
 function Cover({ book, onClick, compact = false }) {
   const [main, accent, ink] = book.palette
   const surname = book.author.split(' ').at(-1)
+  const givenName = book.author.slice(0, Math.max(0, book.author.lastIndexOf(surname))).trim()
+  const surnameClass = surname.length > 12 ? 'cover-author--xl' : surname.length > 9 ? 'cover-author--long' : ''
   return <button className={`cover ${compact ? 'cover--compact' : ''}`} style={{ '--main': main, '--accent': accent, '--ink': ink }} onClick={onClick} aria-label={`Открыть ${book.title}`}>
     <div className="cover-art"><span className="orb orb-a"/><span className="orb orb-b"/><span className="engraving">{getInitials(book.author)}</span></div>
-    <div className="cover-name"><b>{getInitials(book.author)}</b><span>{book.author.replace(surname, '')}</span></div>
-    <div className="cover-author">{surname}</div>
+    <div className="cover-name"><b>{getInitials(book.author)}</b><span>{givenName || 'Автор'}</span></div>
+    <div className={`cover-author ${surnameClass}`}>{surname}</div>
     <div className="cover-meta"><strong>{book.title}</strong><em>Книги, изменившие мир.<br/>Писатели, объединившие поколения.</em></div>
     <div className="cover-ribbon">Э К С К Л Ю З И В Н А Я · К Л А С С И К А</div>
   </button>
