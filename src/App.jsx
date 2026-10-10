@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, Search, Settings2, StickyNote, Upload, X } from 'lucide-react'
 import { get, set } from 'idb-keyval'
+import { formatReadingTime } from './lib/readingExtras.js'
+import { usePageGestures } from './lib/usePageGestures.js'
+import CoverEditor from './CoverEditor.jsx'
+import { App as NativeApp } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import { seedBooks } from './data.js'
 import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, spreadProgress } from './lib/reader.js'
 import { importBook } from './lib/importBook.js'
@@ -15,16 +20,20 @@ function Cover({ book, onClick, compact = false }) {
   const surname = book.author.split(' ').at(-1)
   const givenName = book.author.slice(0, Math.max(0, book.author.lastIndexOf(surname))).trim()
   const surnameClass = surname.length > 12 ? 'cover-author--xl' : surname.length > 9 ? 'cover-author--long' : ''
-  return <button className={`cover ${compact ? 'cover--compact' : ''}`} style={{ '--main': main, '--accent': accent, '--ink': ink }} onClick={onClick} aria-label={`Открыть ${book.title}`}>
+  return <button type="button" className={`cover ${compact ? 'cover--compact' : ''}`} style={{ '--main': main, '--accent': accent, '--ink': ink }} onClick={onClick} aria-label={`Открыть ${book.title}`}>
+    {book.coverImage ? <img className="custom-cover" src={book.coverImage} alt={book.title} style={{ objectFit: book.coverFit || 'cover', objectPosition: `${book.coverX ?? 50}% ${book.coverY ?? 50}%` }}/> : <>
     <div className="cover-art"><span className="orb orb-a"/><span className="orb orb-b"/><span className="engraving">{getInitials(book.author)}</span></div>
     <div className="cover-name"><b>{getInitials(book.author)}</b><span>{givenName || 'Автор'}</span></div>
     <div className={`cover-author ${surnameClass}`}>{surname}</div>
     <div className="cover-meta"><strong>{book.title}</strong><em>Книги, изменившие мир.<br/>Писатели, объединившие поколения.</em></div>
-    <div className="cover-ribbon">Э К С К Л Ю З И В Н А Я · К Л А С С И К А</div>
+    <div className="cover-ribbon">Э К С К Л Ю З И В Н А Я · К Л А С С И К А</div></>}
   </button>
 }
 
 function App() {
+  const [editing, setEditing] = useState(null)
+  const [importErrors, setImportErrors] = useState([])
+  const importLock = useRef(false)
   const [books, setBooks] = useState(seedBooks)
   const [view, setView] = useState('library')
   const [activeId, setActiveId] = useState(null)
@@ -37,6 +46,15 @@ function App() {
   const [storageWritable, setStorageWritable] = useState(false)
   const fileRef = useRef(null)
   const searchRef = useRef(null)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    const listener = NativeApp.addListener('backButton', () => {
+      if (editing) setEditing(null)
+      else if (view === 'reader') setView('library')
+      else NativeApp.minimizeApp()
+    })
+    return () => { listener.then(handle => handle.remove()) }
+  }, [view, editing])
 
   useEffect(() => {
     get(STORAGE_KEY).then(async (saved) => {
@@ -62,13 +80,19 @@ function App() {
   const openBook = (id) => { setActiveId(id); setView('reader'); window.scrollTo(0, 0) }
   const patchBook = (id, patch) => setBooks((all) => all.map((book) => book.id === id ? { ...book, ...patch } : book))
   const handleFiles = async (files) => {
+    if (!storageWritable) { setImportErrors(['Хранилище недоступно. Освободите место и перезапустите приложение перед добавлением книг.']); return }
+    if (importLock.current || !files?.length) return
+    importLock.current = true
     setUploading(true)
+    setImportErrors([])
     const imported = []; const errors = []
     for (const file of [...files]) {
       try { imported.push(await importBook(file)) }
       catch (error) { errors.push(`${file.name}: ${error.message}`) }
     }
     if (imported.length) setBooks((current) => [...imported, ...current])
+    setImportErrors(errors)
+    importLock.current = false
     setToast(errors.length ? `${imported.length} добавлено · ${errors[0]}` : `Добавлено книг: ${imported.length}`)
     setUploading(false)
   }
@@ -79,11 +103,12 @@ function App() {
     <header className="topbar">
       <button className="brand" onClick={() => setView('library')}><span className="brand-mark">Л</span><span><b>Л И Т Е Р А</b><i>личное собрание</i></span></button>
       <nav><button className="active"><Library size={16}/>Библиотека</button><button onClick={() => visible[0] && openBook(visible[0].id)}><BookOpen size={16}/>Читать</button></nav>
-      <div className="top-actions"><button className="upload-button" onClick={() => fileRef.current?.click()}><Upload size={16}/><span>{uploading ? 'Обработка…' : 'Добавить книгу'}</span></button><button className="icon-button mobile"><Menu/></button></div>
-      <input ref={fileRef} hidden multiple type="file" accept=".epub,.mobi,.azw,.azw3,.fb2,.fb2.zip,.fbz,.cbz,.pdf,.docx,.rtf,.txt,.md,.markdown,.html,.htm,.jpg,.jpeg,.png,.webp,.gif,.avif" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
+      <div className="top-actions"><button aria-label={uploading ? 'Обработка книг' : 'Добавить книгу'} disabled={uploading || !storageWritable} className="upload-button" onClick={() => fileRef.current?.click()}><Upload size={16}/><span>{uploading ? 'Обработка…' : 'Добавить книгу'}</span></button><button className="icon-button mobile"><Menu/></button></div>
+      <input ref={fileRef} hidden multiple type="file" accept="*/*" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
     </header>
 
     <main className="library-view" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}>
+      {!!importErrors.length && <section className="import-errors" role="alert"><button aria-label="Закрыть ошибки" onClick={() => setImportErrors([])}>×</button><b>Не удалось добавить некоторые файлы</b><ul>{importErrors.map((error, i) => <li key={i}>{error}</li>)}</ul><p>Остальные книги добавлены. Можно выбрать другой файл и повторить.</p></section>}
       <section className="hero">
         <div className="eyebrow"><span/>ЛИЧНОЕ СОБРАНИЕ · {books.length} ТОМА</div>
         <h1>Ваша библиотека.<br/><em>Всегда рядом.</em></h1>
@@ -102,12 +127,18 @@ function App() {
       {visible.length ? <div className="book-grid">{visible.map((book, index) => <article className="book-card" key={book.id} style={{ '--delay': `${index * 45}ms` }}>
         <div className="book-stage"><Cover book={book} onClick={() => openBook(book.id)}/><button className={`favorite ${book.favorite ? 'on' : ''}`} onClick={() => patchBook(book.id, { favorite: !book.favorite })} aria-label="В избранное"><Heart size={16} fill={book.favorite ? 'currentColor' : 'none'}/></button></div>
         <div className="book-info"><div><h3>{book.title}</h3><p>{book.author}</p></div><button aria-label={`Удалить ${book.title}`} title="Удалить из библиотеки" onClick={() => { if (confirm(`Удалить «${book.title}» из библиотеки?`)) setBooks(all => all.filter(item => item.id !== book.id)) }}><X size={18}/></button></div>
+        <button className="edit-cover" onClick={() => setEditing(book.id)} aria-label={`Изменить обложку ${book.title}`}><Settings2 size={14}/> Обложка и название</button>
         <div className="progress-row"><span><i style={{ width: `${book.progress}%` }}/></span><small>{book.progress ? `${book.progress}%` : 'Не начато'}</small></div>
       </article>)}</div> : <div className="empty"><span>∅</span><h3>На этой полке пока пусто</h3><p>Измените фильтр или добавьте свою книгу.</p></div>}
 
-      <button className="dropzone" onClick={() => fileRef.current?.click()}><Upload/><span><b>Пополнить собрание</b><small>EPUB · MOBI · AZW3 · FB2 · PDF · DOCX · RTF · TXT · MD · HTML · CBZ · изображения</small></span><strong>Выбрать файл</strong></button>
+      <button disabled={uploading || !storageWritable} className="dropzone" onClick={() => fileRef.current?.click()}><Upload/><span><b>Пополнить собрание</b><small>EPUB · MOBI · AZW3 · FB2 · PDF · DOCX · RTF · TXT · MD · HTML · CBZ · изображения</small></span><strong>Выбрать файл</strong></button>
     </main>
     <footer><span>ЛИТЕРА / ЦИФРОВОЕ СОБРАНИЕ</span><i>Частное чтение. Без подписки.</i><span>Все данные хранятся локально</span></footer>
+    {editing && <CoverEditor key={editing} book={books.find(book => book.id === editing)} Preview={Cover} onSave={async patch => {
+      if (!storageWritable) throw new Error('Хранилище недоступно')
+      await set(STORAGE_KEY, books.map(book => book.id === editing ? { ...book, ...patch } : book))
+      patchBook(editing, patch)
+    }} onClose={() => setEditing(null)}/>}
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
@@ -115,6 +146,9 @@ function App() {
 function Reader({ book, onBack, onChange }) {
   const [fontSize, setFontSize] = useState(+localStorage.getItem('litera-font') || 19)
   const [theme, setTheme] = useState(localStorage.getItem('litera-theme') || 'paper')
+  const [speed, setSpeed] = useState(() => Math.max(100, Math.min(450, +localStorage.getItem('litera-speed') || 215)))
+  const [pageSeconds, setPageSeconds] = useState(() => Math.max(30, Math.min(180, +localStorage.getItem('litera-page-seconds') || 60)))
+  const [turn, setTurn] = useState(1)
   const [panel, setPanel] = useState(null)
   const [focus, setFocus] = useState(false)
   const [notes, setNotes] = useState(book.notes || [])
@@ -131,8 +165,8 @@ function Reader({ book, onBack, onChange }) {
   const [mobile, setMobile] = useState(() => matchMedia('(max-width: 760px)').matches)
   const current = Math.min(page, Math.max(0, pages.length - 1))
   const pct = spreadProgress(current, pages.length, mobile)
-  const visibleEnd = Math.min(current + (mobile ? 1 : 2), pages.length)
-  const remaining = isVisual ? Math.max(0, pages.length - visibleEnd) : estimateMinutes(pages.slice(visibleEnd).join(' '))
+  const remaining = useMemo(() => isVisual ? Math.ceil((pages.length - current) * pageSeconds / 60) : estimateMinutes(pages.slice(current).join(' '), speed), [isVisual, pages, current, pageSeconds, speed])
+  useEffect(() => { localStorage.setItem('litera-speed', speed); localStorage.setItem('litera-page-seconds', pageSeconds) }, [speed, pageSeconds])
 
   useEffect(() => { localStorage.setItem('litera-font', fontSize); localStorage.setItem('litera-theme', theme) }, [fontSize, theme])
   useEffect(() => { const media = matchMedia('(max-width: 760px)'); const update = () => setMobile(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update) }, [])
@@ -146,7 +180,14 @@ function Reader({ book, onBack, onChange }) {
   }, [panel])
   const closePanel = () => { setPanel(null); setTimeout(() => panelOpener.current?.focus(), 0) }
   const openPanel = (name, event) => { panelOpener.current = event.currentTarget; setPanel(panel === name ? null : name) }
-  const movePage = (delta) => setPage((value) => { const next = Math.max(0, Math.min(value + delta, pages.length - 1)); locationRef.current = spreadProgress(next, pages.length, mobile); return next })
+  const jumpPage = (target) => {
+    const next = Math.max(0, Math.min(target, pages.length - 1))
+    setTurn(next >= current ? 1 : -1)
+    locationRef.current = spreadProgress(next, pages.length, mobile)
+    setPage(next)
+  }
+  const movePage = delta => jumpPage(current + delta)
+  const gestures = usePageGestures(direction => movePage(direction * (mobile ? 1 : 2)), !!panel)
   useEffect(() => {
     const keys = (e) => {
       if (e.key === 'Escape' && panel) { closePanel(); return }
@@ -157,33 +198,38 @@ function Reader({ book, onBack, onChange }) {
       if (e.key.toLowerCase() === 'f') setFocus(v => !v)
     }
     addEventListener('keydown', keys); return () => removeEventListener('keydown', keys)
-  }, [pages.length, mobile, panel])
-  useEffect(() => { document.querySelectorAll('.paper').forEach((paper) => paper.scrollTo({ top: 0 })) }, [current])
+  }, [current, pages.length, mobile, panel])
+  useEffect(() => { document.querySelector('.reading-desk')?.scrollTo({ top: 0 }); document.querySelectorAll('.paper').forEach((paper) => paper.scrollTo({ top: 0 })) }, [current])
 
   const captureSelection = () => { const text = window.getSelection()?.toString().trim(); if (text) setSelected(text) }
   const addNote = () => { if (!selected) return; const note = prompt('Заметка к цитате (можно оставить пустой):') ?? ''; setNotes((all) => [{ id: Date.now(), quote: selected, note, page: current + 1 }, ...all]); setSelected(''); window.getSelection()?.removeAllRanges() }
 
-  return <div className={`reader theme-${theme} ${focus ? 'is-focus' : ''}`} style={{ '--reading-size': `${fontSize}px` }}>
+  return <div className={`reader theme-${theme} ${focus ? 'is-focus' : ''}`} style={{ '--reading-size': `${fontSize}px`, '--turn-offset': `${turn * 16}px` }}>
     <header className="reader-top">
       <button className="reader-brand" onClick={onBack}><span>Л</span><i>ЛИТЕРА</i></button>
       <button className="back" onClick={onBack}><ArrowLeft size={17}/> Библиотека</button>
       <div className="reader-title"><b>{book.title}</b><span>{book.author}</span></div>
       <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
     </header>
-    <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> {remaining ? isVisual ? `${remaining} стр. до конца` : `≈ ${remaining} мин до конца` : 'последняя страница'}</span></div>
+    <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> <span aria-label="Осталось читать">≈ {formatReadingTime(remaining)} до конца</span></span></div>
 
-    <main className="reading-desk">
-      {isVisual ? <VisualSpread book={book} current={current} /> : <div className="spread" onMouseUp={captureSelection}>
+    <main className="reading-desk" {...gestures}>
+      {isVisual ? <VisualSpread key={current} book={book} current={current} /> : <div key={current} className="spread" onMouseUp={captureSelection} onTouchEnd={() => setTimeout(captureSelection, 100)}>
         <div className="paper page-left"><div className="running"><span>{book.author}</span><em>ЛИТЕРА · ЛИЧНОЕ СОБРАНИЕ</em></div><PageText text={pages[current]} first={current === 0}/><div className="folio"><span>{current + 1}</span><i>{book.title}</i></div></div>
         <div className="paper page-right"><div className="bookmark-ribbon"/><div className="running"><em>ЭКСКЛЮЗИВНАЯ КЛАССИКА</em><span>{book.title}</span></div><PageText text={pages[current + 1] || ''}/><div className="folio"><i>{book.author}</i><span>{Math.min(current + 2, pages.length)}</span></div></div>
       </div>}
-      <><button aria-label="Предыдущая страница" className="page-nav prev" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button><button aria-label="Следующая страница" className="page-nav next" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => movePage(mobile ? 1 : 2)}><ArrowRight/></button></>
+
       {!isVisual && selected && <button className="selection-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}><Highlighter size={15}/> Сохранить цитату</button>}
     </main>
+    <nav className="reader-navigation" aria-label="Перелистывание">
+      <button aria-label="Предыдущая страница" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button>
+      <label className="page-slider"><span>{current + 1} / {pages.length} стр. · {pct}%<small>Свайп или тап по краям</small></span><input aria-label="Перейти к странице" type="range" min="1" max={pages.length} value={current + 1} onChange={e => jumpPage(+e.target.value - 1)}/></label>
+      <button aria-label="Следующая страница" disabled={current >= pages.length - (mobile ? 1 : 2)} onClick={() => movePage(mobile ? 1 : 2)}><ArrowRight/></button>
+    </nav>
     <footer className="reader-bottom"><span><i className="live"/> Режим чтения</span><span>Шрифт: EB Garamond · {fontSize}px</span><button onClick={(e) => openPanel('notes', e)}><Bookmark size={15}/> Заметки и цитаты · {notes.length}</button><span className="shortcuts">← → листать · F фокус</span></footer>
 
     {panel && <div className="panel-backdrop" onClick={closePanel}><aside ref={panelRef} className="side-panel" role="dialog" aria-modal="true" aria-label={panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'} onClick={(e) => e.stopPropagation()}><div className="panel-head"><div><small>{panel === 'settings' ? 'ВИД ИЗДАНИЯ' : 'ПОЛЯ ЧИТАТЕЛЯ'}</small><h2>{panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'}</h2></div><button aria-label="Закрыть" autoFocus onClick={closePanel}><X/></button></div>
-      {panel === 'settings' ? <div className="settings-list"><section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section><section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section><section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section></div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
+      {panel === 'settings' ? <div className="settings-list"><section className="reading-estimate"><b>≈ {formatReadingTime(remaining)} до конца</b><p>{isVisual ? 'Приблизительно: по времени на одну страницу, включая текущую.' : 'По объёму оставшегося текста, включая текущую страницу.'}</p><label>{isVisual ? 'Секунд на страницу' : 'Слов в минуту'}<b>{isVisual ? pageSeconds : speed}</b></label><input aria-label={isVisual ? 'Секунд на страницу' : 'Скорость чтения'} type="range" min={isVisual ? 30 : 100} max={isVisual ? 180 : 450} step={isVisual ? 15 : 5} value={isVisual ? pageSeconds : speed} onChange={e => isVisual ? setPageSeconds(+e.target.value) : setSpeed(+e.target.value)}/></section><section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section><section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section><section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section></div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
     </aside></div>}
   </div>
 }
@@ -222,11 +268,16 @@ function PdfCanvas({ file, number }) {
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
+    if (!width) return
     let cancelled = false; let task
+    setError('')
     const render = async () => {
       try {
-        if (!pdfDocuments.has(file)) pdfDocuments.set(file, import('./lib/pdf.js').then(({ openPdf }) => openPdf(file)))
-        const pdf = await pdfDocuments.get(file); const pdfPage = await pdf.getPage(number)
+        if (!pdfDocuments.has(file)) pdfDocuments.set(file, import('./lib/pdf.js').then(({ openPdf }) => openPdf(file)).catch(error => { pdfDocuments.delete(file); throw error }))
+        const pdf = await pdfDocuments.get(file)
+        if (cancelled) return
+        const pdfPage = await pdf.getPage(number)
+        if (cancelled || !canvasRef.current) return
         const base = pdfPage.getViewport({ scale: 1 }); const available = Math.max(260, width || wrapRef.current.clientWidth)
         const scale = available / base.width; const viewport = pdfPage.getViewport({ scale })
         const ratio = Math.min(devicePixelRatio || 1, 2); const canvas = canvasRef.current; const context = canvas.getContext('2d')
@@ -234,11 +285,11 @@ function PdfCanvas({ file, number }) {
         canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`
         task = pdfPage.render({ canvasContext: context, viewport, transform: ratio === 1 ? null : [ratio,0,0,ratio,0,0] })
         await task.promise
-      } catch (reason) { if (!cancelled && reason?.name !== 'RenderingCancelledException') setError('Не удалось отрисовать страницу') }
+      } catch (reason) { if (!cancelled && reason?.name !== 'RenderingCancelledException') setError(`Не удалось отрисовать страницу: ${reason.message || 'неизвестная ошибка'}`) }
     }
     render(); return () => { cancelled = true; task?.cancel() }
   }, [file, number, width])
-  return <div ref={wrapRef} className="visual-content pdf-canvas">{error ? <p>{error}</p> : <canvas ref={canvasRef}/>}</div>
+  return <div ref={wrapRef} className="visual-content pdf-canvas">{error && <p role="alert">{error}</p>}<canvas ref={canvasRef} hidden={!!error}/></div>
 }
 
 export default App

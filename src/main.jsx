@@ -11,5 +11,6 @@ import '@fontsource/oswald/latin.css'
 import '@fontsource/space-grotesk/latin.css'
 import App from './App.jsx'
 import './styles.css'
+import './responsive.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)

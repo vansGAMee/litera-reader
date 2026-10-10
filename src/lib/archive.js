@@ -45,3 +45,18 @@ export async function extractComicPages(file) {
     return pages
   })
 }
+
+// Inspect ZIP contents: download providers often replace .fb2.zip with .zip.
+export async function unpackBookArchive(file) {
+  return withEntries(file, async entries => {
+    const files = entries.filter(entry => !entry.directory && !entry.filename.startsWith('__MACOSX/'))
+    if (files.some(entry => entry.filename === 'META-INF/container.xml')) return new File([file], 'book.epub')
+    if (files.some(entry => entry.filename === 'word/document.xml')) return new File([file], 'book.docx')
+    let books = files.filter(entry => /\.(fb2|epub|mobi|azw3?|pdf|docx|rtf)$/i.test(entry.filename))
+    if (!books.length) books = files.filter(entry => /\.(txt|md|markdown|html?)$/i.test(entry.filename) && !/(^|\/)(readme|license)\./i.test(entry.filename))
+    if (books.length > 1) throw new Error('В ZIP несколько книг. Распакуйте архив и выберите нужные файлы')
+    if (books.length === 1) return new File([await books[0].getData(new BlobWriter())], books[0].filename.split('/').pop().toLowerCase())
+    if (files.some(entry => /\.(jpe?g|png|webp|gif|avif)$/i.test(entry.filename))) return new File([file], 'comic.cbz')
+    throw new Error('В ZIP не найдена поддерживаемая книга или изображения')
+  })
+}

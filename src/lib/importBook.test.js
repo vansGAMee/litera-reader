@@ -59,3 +59,25 @@ describe('structured document normalization', () => {
     expect(structuredText({ body })).toBe('Loose text\n\nNested item')
   })
 })
+
+describe('real document imports', () => {
+  it('decodes UTF-16BE text', async () => {
+    const { importBook } = await import('./importBook.js')
+    const text = 'Привет, читатель!'
+    const bytes = [0xfe, 0xff, ...Array.from(text).flatMap(c => [c.charCodeAt(0) >> 8, c.charCodeAt(0) & 255])]
+    expect((await importBook(new File([new Uint8Array(bytes)], 'book.txt'))).text).toBe(text)
+  })
+  it('decodes even short Windows-1251 text', async () => {
+    const { importBook } = await import('./importBook.js')
+    expect((await importBook(new File([new Uint8Array([0xdf])], 'book.txt'))).text).toBe('Я')
+  })
+  it('rejects an empty book with a useful message', async () => {
+    const { importBook } = await import('./importBook.js')
+    await expect(importBook(new File([], 'empty.epub'))).rejects.toThrow('Файл пуст')
+  })
+  it('preserves XHTML paragraphs and excludes scripts', () => {
+    const t = nodeValue => ({ nodeType: 3, nodeValue })
+    const el = (tagName, ...childNodes) => ({ nodeType: 1, tagName, childNodes })
+    expect(structuredText({ documentElement: el('html', el('body', el('p', t('Первый')), el('p', t('Второй')), el('script', t('bad')))) })).toBe('Первый\n\nВторой')
+  })
+})

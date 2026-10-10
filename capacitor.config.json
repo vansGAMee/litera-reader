@@ -1,0 +1,6 @@
+{
+  "appId": "ru.litera.reader",
+  "appName": "Литера",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#f4f0e8" }
+}

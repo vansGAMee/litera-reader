@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Литера</string>
+    <string name="title_activity_main">Литера</string>
+    <string name="package_name">ru.litera.reader</string>
+    <string name="custom_url_scheme">ru.litera.reader</string>
+</resources>

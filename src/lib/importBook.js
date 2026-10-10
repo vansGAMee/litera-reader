@@ -1,5 +1,5 @@
 import { normalizeText } from './reader.js'
-import { extractComicPages, validateZipArchive } from './archive.js'
+import { extractComicPages, validateZipArchive, unpackBookArchive } from './archive.js'
 
 const EBOOK = new Set(['epub', 'mobi', 'azw', 'azw3', 'fb2', 'fbz'])
 const DOCUMENT = new Set(['txt', 'md', 'markdown', 'html', 'htm', 'docx', 'rtf'])
@@ -11,6 +11,7 @@ const extensionOf = (name = '') => name.toLowerCase().endsWith('.fb2.zip')
 export function classifyFormat(name = '') {
   const ext = extensionOf(name)
   if (EBOOK.has(ext) || ext === 'fb2.zip') return 'ebook'
+  if (ext === 'zip') return 'archive'
   if (ext === 'cbz') return 'comic'
   if (ext === 'pdf') return 'pdf'
   if (DOCUMENT.has(ext)) return 'document'
@@ -35,15 +36,16 @@ const baseMeta = (file) => ({
 })
 
 export const structuredText = (doc) => {
-  const root = doc.body || doc.documentElement
+  const root = doc.body || doc.querySelector?.('body') || doc.documentElement
   const blocks = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'DT', 'DD', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'P', 'PRE', 'SECTION', 'TABLE', 'TR'])
   const ignored = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'OBJECT', 'EMBED', 'IFRAME', 'FORM', 'NAV'])
   const parts = []
   const walk = (node) => {
     if (node.nodeType === 3) { parts.push(node.nodeValue || ''); return }
-    if (node.nodeType !== 1 || ignored.has(node.tagName)) return
-    const isBlock = blocks.has(node.tagName)
-    if (isBlock || node.tagName === 'BR') parts.push('\n\n')
+    const tag = (node.localName || node.tagName || '').toUpperCase()
+    if (node.nodeType !== 1 || ignored.has(tag)) return
+    const isBlock = blocks.has(tag)
+    if (isBlock || tag === 'BR') parts.push('\n\n')
     for (const child of node.childNodes) walk(child)
     if (isBlock) parts.push('\n\n')
   }
@@ -54,9 +56,9 @@ export const structuredText = (doc) => {
 const decodeText = async (file) => {
   const bytes = new Uint8Array(await file.arrayBuffer())
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes)
-  const utf8 = new TextDecoder('utf-8').decode(bytes)
-  const bad = (utf8.match(/�/g) || []).length
-  return bad > Math.max(2, utf8.length / 500) ? new TextDecoder('windows-1251').decode(bytes) : utf8
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes)
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
+  catch { return new TextDecoder('windows-1251').decode(bytes) }
 }
 
 const RTF_DESTINATIONS = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'generator', 'pict', 'shppict', 'nonshppict', 'object', 'header', 'footer', 'headerl', 'headerr', 'footerl', 'footerr', 'fldinst', 'xmlnstbl', 'listtable', 'listoverridetable', 'datastore', 'themedata', 'filetbl', 'revtbl', 'rsidtbl', 'latentstyles', 'pgptbl', 'colorschememapping'])
@@ -158,7 +160,8 @@ const extractDocument = async (file, ext) => {
 
 const extractEbook = async (file) => {
   const { makeBook } = await import('foliate-js/view.js')
-  const engine = await makeBook(file)
+  const engine = await makeBook(new File([file], file.name.toLowerCase(), { type: file.type }))
+  try {
   const chunks = []
   for (const section of engine.sections) {
     if (section.linear === 'no' || !section.createDocument) continue
@@ -172,14 +175,21 @@ const extractEbook = async (file) => {
     title: valueOf(engine.metadata?.title), author: valueOf(engine.metadata?.author),
     language: valueOf(engine.metadata?.language),
   }
+  } finally { engine.destroy?.() }
 }
 
 export async function importBook(file) {
+  if (!file.size) throw new Error('Файл пуст — выберите книгу с содержимым')
   const family = classifyFormat(file.name)
   if (!family) throw new Error('Формат не поддерживается или защищён DRM')
   if (file.size > 250 * 1024 * 1024) throw new Error('Файл больше 250 МБ — браузер не сможет надёжно сохранить его локально')
   const meta = baseMeta(file)
   const ext = extensionOf(file.name)
+  if (['zip', 'fbz', 'fb2.zip'].includes(ext)) {
+    const unpacked = await unpackBookArchive(file)
+    const book = await importBook(unpacked)
+    return { ...book, title: book.title === 'book' || book.title === 'comic' ? meta.title : book.title }
+  }
 
   if (['epub', 'fbz', 'fb2.zip', 'docx'].includes(ext)) await validateZipArchive(file)
 
