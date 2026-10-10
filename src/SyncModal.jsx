@@ -150,7 +150,7 @@ export default function SyncModal({ books, onSyncApply, onLibraryImport, onClose
 
   const handleRawData = (raw) => {
     const parsed = decodeSyncPayload(raw)
-    if (!parsed || !parsed.items.length) {
+    if (!parsed || !parsed.items?.length) {
       setScanStatus({ state: 'error', message: 'Не удалось распознать код Литеры. Проверьте код или ссылку.' })
       return
     }

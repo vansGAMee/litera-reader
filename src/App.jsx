@@ -81,27 +81,32 @@ function App() {
   // Auto-sync reading progress if opened via direct sync link (#sync=...)
   useEffect(() => {
     if (typeof window === 'undefined' || !hydrated) return
-    const hash = window.location.hash
-    if (hash && hash.includes('sync=')) {
-      const parsed = extractSyncPayloadFromUrl(hash)
-      if (parsed && parsed.items?.length) {
-        setBooks((current) => {
-          const { updatedBooks, changedCount, updatedTitles } = mergeLibraryProgress(current, parsed)
-          if (changedCount > 0) {
-            setToast(`Синхронизировано из ссылки: ${changedCount} книг (${updatedTitles.slice(0, 2).join(', ')})`)
-            return updatedBooks
-          } else {
-            setToast('Прогресс из ссылки уже актуален')
-            return current
-          }
-        })
-      }
-      try {
-        history.replaceState(null, '', window.location.pathname + window.location.search)
-      } catch {
-        /* ignore */
+    const checkHash = () => {
+      const hash = window.location.hash
+      if (hash && hash.includes('sync=')) {
+        const parsed = extractSyncPayloadFromUrl(hash)
+        if (parsed && parsed.items?.length) {
+          setBooks((current) => {
+            const { updatedBooks, changedCount, updatedTitles } = mergeLibraryProgress(current, parsed)
+            if (changedCount > 0) {
+              setToast(`Синхронизировано из ссылки: ${changedCount} книг (${updatedTitles.slice(0, 2).join(', ')})`)
+              return updatedBooks
+            } else {
+              setToast('Прогресс из ссылки уже актуален')
+              return current
+            }
+          })
+        }
+        try {
+          history.replaceState(null, '', window.location.pathname + window.location.search)
+        } catch {
+          /* ignore */
+        }
       }
     }
+    checkHash()
+    window.addEventListener('hashchange', checkHash)
+    return () => window.removeEventListener('hashchange', checkHash)
   }, [hydrated])
 
   const visible = useMemo(() => books.filter((book) => {
@@ -257,11 +262,11 @@ function Reader({ book, onBack, onChange }) {
   useEffect(() => {
     const update = () => setMobile(isMobileView())
     window.addEventListener('resize', update)
-    const media = matchMedia('(max-width: 760px)')
-    media.addEventListener('change', update)
+    const media = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 760px)') : null
+    media?.addEventListener?.('change', update)
     return () => {
       window.removeEventListener('resize', update)
-      media.removeEventListener('change', update)
+      media?.removeEventListener?.('change', update)
     }
   }, [])
 
