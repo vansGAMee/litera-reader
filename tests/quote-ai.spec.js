@@ -4,11 +4,11 @@ test('AI quote trainer opens, scores quotes, learns from likes and skips, and up
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Добавить книгу' })).toBeEnabled()
 
-  // 1. Проверяем наличие кнопки Цитаты ИИ на карточке первой книги на полке
-  const aiShelfBtn = page.getByRole('button', { name: /Цитатник ИИ: Братья Карамазовы/ }).first()
+  // 1. Проверяем наличие кнопки Цитаты на карточке первой книги на полке
+  const aiShelfBtn = page.getByRole('button', { name: /Цитаты: Братья Карамазовы/ }).first()
   await expect(aiShelfBtn).toBeVisible()
 
-  // Открываем модальное окно ИИ-цитатника
+  // Открываем модальное окно цитатника
   await aiShelfBtn.click()
 
   const modal = page.getByRole('dialog')
@@ -28,18 +28,17 @@ test('AI quote trainer opens, scores quotes, learns from likes and skips, and up
   const likeBtn = modal.getByRole('button', { name: 'Лайк' })
   await likeBtn.click()
 
-  // Проверяем тост об обновлении вкуса ИИ
-  await expect(modal.locator('.trainer-toast')).toContainText('Вкус ИИ обновлён')
+  // Проверяем тост об обновлении предпочтений
+  await expect(modal.locator('.trainer-toast')).toContainText('Предпочтения обновлены')
 
   // 4. Нажимаем кнопку "Мимо" на следующей цитате
   const skipBtn = modal.getByRole('button', { name: 'Мимо' })
   await skipBtn.click()
-  await expect(modal.locator('.trainer-toast')).toContainText('ИИ учёл ваши предпочтения')
+  await expect(modal.locator('.trainer-toast')).toContainText('Рекомендации обновлены')
 
-  // 5. Переходим на вкладку "Вкус ИИ"
-  await modal.getByRole('button', { name: /Вкус ИИ/ }).click()
-  await expect(modal.getByText('Семантическая нейросеть LSQ-Net')).toBeVisible()
-  await expect(modal.getByText('NVIDIA GeForce RTX 4060')).toBeVisible()
+  // 5. Переходим на вкладку "Предпочтения"
+  await modal.getByRole('button', { name: /Предпочтения/ }).click()
+  await expect(modal.getByText('Персональные предпочтения')).toBeVisible()
   await expect(modal.locator('.stat-box b').first()).toContainText('2') // Всего 2 оценки (1 лайк, 1 мимо)
 
   // 6. Переходим на вкладку "Все цитаты"
@@ -50,11 +49,11 @@ test('AI quote trainer opens, scores quotes, learns from likes and skips, and up
   await modal.getByRole('button', { name: 'Закрыть цитатник' }).click()
   await expect(modal).toHaveCount(0)
 
-  // 8. Открываем книгу в читалке и проверяем кнопку ИИ в шапке
+  // 8. Открываем книгу в читалке и проверяем кнопку Цитаты в шапке
   await page.getByRole('button', { name: 'Открыть Братья Карамазовы' }).first().click()
   await expect(page.locator('.reader-title')).toContainText('Братья Карамазовы')
 
-  const readerAiBtn = page.getByRole('button', { name: 'ИИ-Цитатник' })
+  const readerAiBtn = page.locator('.ai-quote-trigger')
   await expect(readerAiBtn).toBeVisible()
   await readerAiBtn.click()
 

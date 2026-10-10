@@ -131,7 +131,7 @@ function App() {
         <div className="book-info"><div><h3>{book.title}</h3><p>{book.author}</p></div><button aria-label={`Удалить ${book.title}`} title="Удалить из библиотеки" onClick={() => { if (confirm(`Удалить «${book.title}» из библиотеки?`)) setBooks(all => all.filter(item => item.id !== book.id)) }}><X size={18}/></button></div>
         <div className="card-actions-row">
           <button className="edit-cover" onClick={() => setEditing(book.id)} aria-label={`Изменить обложку ${book.title}`}><Settings2 size={14}/> Обложка</button>
-          <button className="ai-quote-card-btn" onClick={() => setAiTrainerBook(book)} aria-label={`Цитатник ИИ: ${book.title}`} title="Подобрать цитаты и обучить ИИ"><Sparkles size={14}/> Цитаты ИИ</button>
+          <button className="ai-quote-card-btn" onClick={() => setAiTrainerBook(book)} aria-label={`Цитаты: ${book.title}`} title="Подобрать цитаты из книги"><Sparkles size={14}/> Цитаты</button>
         </div>
         <div className="progress-row"><span><i style={{ width: `${book.progress}%` }}/></span><small>{book.progress ? `${book.progress}%` : 'Не начато'}</small></div>
       </article>)}</div> : <div className="empty"><span>∅</span><h3>На этой полке пока пусто</h3><p>Измените фильтр или добавьте свою книгу.</p></div>}
@@ -222,7 +222,7 @@ function Reader({ book, onBack, onChange }) {
       <button className="reader-brand" onClick={onBack}><span>Л</span><i>ЛИТЕРА</i></button>
       <button className="back" onClick={onBack}><ArrowLeft size={17}/> Библиотека</button>
       <div className="reader-title"><b>{book.title}</b><span>{book.author}</span></div>
-      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="ИИ-Цитатник" onClick={() => setTrainerOpen(true)} title="ИИ-Цитатник (поиск и обучение)" className="ai-quote-trigger"><Sparkles size={18}/><span>ИИ</span></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
+      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Цитаты" onClick={() => setTrainerOpen(true)} title="Избранные цитаты" className="ai-quote-trigger"><Sparkles size={18}/><span>Цитаты</span></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
     </header>
     <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> <span aria-label="Осталось читать">≈ {formatReadingTime(remaining)} до конца</span></span></div>
 
