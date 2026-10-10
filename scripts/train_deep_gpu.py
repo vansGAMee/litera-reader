@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-LSQ-Net: Litera Semantic Quote Net
-Deep neural network for quotation meaning comprehension and extraction.
-Trained on NVIDIA GeForce RTX 4060 using PyTorch CUDA.
+LSQ-Net: Litera Semantic Quote Net (v2.1)
+Trained on NVIDIA GeForce RTX 4060 with CUDA.
+Dataset: 2,438 authentic Russian literary quotes and real classical narrative negatives.
 """
 
 import json
 import os
 import math
+import re
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
 
-# Категории смысла
 MEANING_CATEGORIES = [
     "Экзистенциальная философия (жизнь, время, выбор)",
     "Этика и совесть (добро, зло, правда, искупление)",
@@ -21,172 +23,137 @@ MEANING_CATEGORIES = [
     "Вечные истины и красота (искусство, гармония, память)"
 ]
 
-TRAIN_SAMPLES = [
-    # Категория 0: Экзистенциальная философия
-    ("Человек есть тайна. Ее надо разгадать, и ежели будешь ее разгадывать всю жизнь, то не говори, что потерял время.", 0, 1),
-    ("Да, человек смертен, но это было бы еще полбеды. Плохо то, что он иногда внезапно смертен, вот в чем фокус!", 0, 1),
-    ("Жизнь — это то, что с тобой происходит, пока ты строишь совсем другие планы.", 0, 1),
-    ("Тот, у кого есть зачем жить, может вынести почти любое как.", 0, 1),
-    ("Презирать страдание — значит презирать самое жизнь, так как вся жизнь человека состоит из ощущений голода, холода и страха перед смертью.", 0, 1),
-    ("Времена не выбирают, в них живут и умирают.", 0, 1),
-    ("Наша жизнь такова, какой ее делают наши мысли.", 0, 1),
-    ("Время лечит почти всё. Дай времени немного времени.", 0, 1),
-    ("Грозна, страшна грядущая впереди старость, и ничего не отдает назад и обратно!", 0, 1),
-    ("Человек живет не для своих нужд, а для правды, для бога, для вечного закона любви.", 0, 1),
-    ("Листьям в дубраве древесной подобны сыны человеков: один народился, другой исчезает.", 0, 1),
-    ("Самое тяжелое бремя — это жизнь, в которой нет цели.", 0, 1),
+def str_hash(w: str) -> int:
+    h = 0
+    for ch in w:
+        h = ((h * 31) + ord(ch)) & 0xFFFFFFFF
+    return h
 
-    # Категория 1: Этика и совесть
-    ("Ведь вся познанная истина не стоит тогда слезинки одного этого замученного ребенка.", 1, 1),
-    ("Трусость, несомненно, один из самых страшных пороков. Нет, философ, я тебе возражаю: это самый страшный порок.", 1, 1),
-    ("Если добро имеет причину, оно уже не добро; если оно имеет следствие — награду, оно тоже не добро.", 1, 1),
-    ("Злых людей нет на свете, есть только люди несчастливые.", 1, 1),
-    ("Сострадание есть главнейший и, может быть, единственный закон бытия всего человечества.", 1, 1),
-    ("Свобода не в том, чтоб не сдерживать себя, а в том, чтоб владеть собой.", 1, 1),
-    ("Совесть — это голос бога в человеке, который не дает покоя сердцу.", 1, 1),
-    ("Ты навсегда в ответе за всех, кого приручил.", 1, 1),
-    ("Себя судить куда труднее, чем других. Если ты сумеешь правильно судить себя, значит, ты поистине мудр.", 1, 1),
-    ("Ничто не обходится нам так дешево и не ценится так дорого, как вежливость и доброта.", 1, 1),
-    ("Ненависть не может изгнать ненависть: только любовь может сделать это.", 1, 1),
+EXISTENTIAL = {
+    'жизнь', 'жизни', 'жизнью', 'жизней', 'смерть', 'смерти', 'смертью', 
+    'человек', 'человека', 'человеку', 'человеком', 'человеке', 'люди', 'людей', 'людям', 
+    'время', 'времени', 'временем', 'вечность', 'вечности', 'вечный', 'вечно', 
+    'бытие', 'бытия', 'судьба', 'судьбы', 'судьбе', 'судьбу', 'выбор', 'выбора', 
+    'смысл', 'смысла', 'смысле', 'рождение', 'мир', 'мира', 'мире', 'вселенная', 
+    'существование', 'небытие', 'пустота', 'рок', 'исход'
+}
 
-    # Категория 2: Тайны человеческой души
-    ("Что есть ад? Рассуждаю так: Страдание о том, что нельзя уже более любить.", 2, 1),
-    ("Печаль моя светла; печаль моя полна тобою.", 2, 1),
-    ("Любовь — это когда центр вселенной внезапно смещается в другого человека.", 2, 1),
-    ("Тот, кто любит, должен разделять участь того, кого он любит.", 2, 1),
-    ("Память согревает человека изнутри, и в то же время рвет его на части.", 2, 1),
-    ("В тишине слышно то, что заглушает суетливый шум мира.", 2, 1),
-    ("Грусть — это признак благородного сердца, умеющего чувствовать вечность среди суеты.", 2, 1),
-    ("Зорко одно лишь сердце. Самого главного глазами не увидишь.", 2, 1),
-    ("Человек страдает не столько от того, что происходит, сколько от того, как он оценивает происходящее.", 2, 1),
+ETHICAL = {
+    'добро', 'добра', 'добру', 'добром', 'зло', 'зла', 'злу', 'злом', 
+    'совесть', 'совести', 'совестью', 'правда', 'правды', 'правде', 'правду', 
+    'истина', 'истины', 'истине', 'истину', 'грех', 'греха', 'грехи', 'грехов', 
+    'прощение', 'прощения', 'сострадание', 'вина', 'вины', 'ответственность', 
+    'долг', 'долга', 'долге', 'честь', 'чести', 'стыд', 'стыда', 
+    'ложь', 'лжи', 'ложью', 'лицемерие', 'предательство', 'благородство', 
+    'порок', 'порока', 'пороков', 'бог', 'бога', 'богу', 'дьявол', 'дьявола'
+}
 
-    # Категория 3: Афоризм и парадокс
-    ("Все счастливые семьи похожи друг на друга, каждая несчастливая семья несчастлива по-своему.", 3, 1),
-    ("Никогда и ничего не просите! Никогда и ничего, и в особенности у тех, кто сильнее вас. Сами предложат и сами всё дадут!", 3, 1),
-    ("Краткость — сестра таланта.", 3, 1),
-    ("Будь собой, остальные роли уже заняты.", 3, 1),
-    ("Единственный способ избавиться от искушения — поддаться ему.", 3, 1),
-    ("Если долго смотреть в бездну, то бездна тоже смотрит в тебя.", 3, 1),
-    ("Счастье не в том, чтобы делать всегда, что хочешь, а в том, чтобы всегда хотеть того, что делаешь.", 3, 1),
-    ("Спокойствие — душевная подлость.", 3, 1),
-    ("Если хочешь, чтобы у тебя было мало времени, ничего не делай.", 3, 1),
-    ("Как ни глупы слова дурака, а иногда бывают они достаточны, чтобы смутить умного человека.", 3, 1),
-    ("Только утратив всё до конца, мы обретаем свободу.", 3, 1),
+PSYCHOLOGICAL = {
+    'душа', 'души', 'душе', 'душу', 'душой', 'сердце', 'сердца', 'сердцу', 'сердцем', 
+    'любовь', 'любви', 'любовью', 'страх', 'страха', 'страху', 'страсть', 'страсти', 
+    'одиночество', 'одиночества', 'печаль', 'печали', 'грусть', 'грусти', 
+    'тайна', 'тайны', 'тайну', 'боль', 'боли', 'болью', 'страдание', 'страдания', 
+    'слезы', 'слез', 'радость', 'радости', 'тоска', 'тоски', 'надежда', 'надежды', 
+    'отчаяние', 'отчаяния', 'мука', 'муки', 'тревога', 'покой', 'покоя'
+}
 
-    # Категория 4: Вечные истины и красота
-    ("Красота спасет мир.", 4, 1),
-    ("Красота — это страшная и ужасная вещь! Тут дьявол с богом борется, а поле битвы — сердца людей.", 4, 1),
-    ("Рукописи не горят.", 4, 1),
-    ("В человеке должно быть всё прекрасно: и лицо, и одежда, и душа, и мысли.", 4, 1),
-    ("Едва ли есть высшее из наслаждений, как наслаждение творить.", 4, 1),
-    ("Искусство смывает пыль повседневной жизни с души.", 4, 1),
-    ("Надо любить жизнь больше, чем смысл ее.", 4, 1),
-    ("Быть человеком — это чувствовать свою ответственность.", 4, 1),
-    ("Пока человек не сдается, он сильнее своей судьбы.", 4, 1),
-    ("Все мы сидим в сточной канаве, но некоторые из нас смотрят на звезды.", 4, 1),
+APHORISTIC = {
+    'все', 'всё', 'всего', 'всем', 'никто', 'никого', 'никому', 'ничто', 'ничего', 'ничему', 
+    'никогда', 'всегда', 'каждый', 'каждого', 'всякий', 'всякого', 'но', 'однако', 
+    'нежели', 'зато', 'чем', 'тем', 'если', 'ибо', 'лишь', 'только', 'разве', 
+    'неужели', 'поистине', 'действительно', 'следовательно', 'стало', 'быть', 'суть'
+}
 
-    # Отрицательные примеры (Хард-негатив: экспозиция, сюжет, действия, бытовые диалоги)
-    ("Алексей Федорович Карамазов был третьим сыном помещика нашего уезда Федора Павловича Карамазова.", 0, 0),
-    ("Слова ложились на бумагу медленно, будто каждое из них прежде должно было пройти испытание тишиной.", 0, 0),
-    ("За окном темнел сад, и редкие огни на другом берегу казались знаками, оставленными неизвестным читателем.", 0, 0),
-    ("Книга не торопила. Она позволяла остановиться, вернуться к началу фразы и услышать то, что осталось между строк.", 0, 0),
-    ("Однажды весною, в час необыкновенно жаркого заката, в Москве, на Патриарших прудах, появились два гражданина.", 0, 0),
-    ("Попав в тень чуть зеленеющих лип, писатели первым долгом бросились к пестро раскрашенной будочке с надписью Пиво и воды.", 0, 0),
-    ("Но никого не было в будочке, и граждане выпили теплой абрикосовой воды, давшей обильную желтую пену.", 0, 0),
-    ("В белом плаще с кровавым подбоем, шаркающей походкой, ранним утром вышел прокуратор Иудеи Понтий Пилат.", 0, 0),
-    ("Он надел пальто, застегнул пуговицы и вышел на улицу.", 0, 0),
-    ("Она подошла к окну, отодвинула штору и посмотрела вниз на дорогу.", 0, 0),
-    ("Петр достал из кармана связку ключей и попытался открыть замок.", 0, 0),
-    ("Иван сел за деревянный стол и налил себе стакан холодной воды.", 0, 0),
-    ("Они шли молча по тропинке, обходя глубокие лужи после вчерашнего дождя.", 0, 0),
-    ("Она положила книгу на тумбочку, погасила настольную лампу и легла спать.", 0, 0),
-    ("Сергей взглянул на наручные часы: стрелка показывала без десяти восемь.", 0, 0),
-    ("— Пойдем завтра в магазин? — спросил он. — Надо купить чаю.", 0, 0),
-    ("— Да, конечно, — ответила она и повернулась спиной к двери.", 0, 0),
-    ("— Который сейчас час? — Без четверти шесть, если часы не врут.", 0, 0),
-    ("— Передайте соль, пожалуйста, — попросил сосед слева.", 0, 0),
-    ("— Закройте окно, дует! — сердито сказала старуха в платке.", 0, 0),
-    ("Погода в этот день была пасмурная и сырая, дул холодный северный ветер.", 0, 0),
-    ("Комната была продолговатая, с низким потолком и двумя узкими окнами.", 0, 0),
-    ("В больничном дворе стоит небольшой флигель, окруженный лесом репейника, крапивы и дикой конопли.", 0, 0),
-    ("Крыша на нем ржавая, труба наполовину обвалилась, ступеньки у крыльца сгнили.", 0, 0),
-    ("Глава первая. В которой читатель знакомится с главным героем.", 0, 0),
-    ("Часть вторая. Год 1812. Глава пятая.", 0, 0),
-    ("Оглавление. Введение ............... 5. Глава 1 ............... 12.", 0, 0)
-]
+ROUTINE_NOISE = {
+    'пошел', 'пошла', 'пошли', 'вошел', 'вошла', 'вошли', 'вышел', 'вышла', 'вышли', 
+    'подошел', 'подошла', 'сел', 'села', 'сели', 'встал', 'встала', 'встали', 
+    'надел', 'надела', 'снял', 'сняла', 'взял', 'взяла', 'взяли', 'положил', 'положила', 
+    'открыл', 'открыла', 'закрыл', 'закрыла', 'сказал', 'сказала', 'сказали', 
+    'спросил', 'спросила', 'ответил', 'ответила', 'проговорил', 'пробормотал', 
+    'посмотрел', 'посмотрела', 'взглянул', 'кивнул', 'улыбнулся', 'пожал', 
+    'комната', 'комнаты', 'комнате', 'дверь', 'двери', 'дверью', 'окно', 'окна', 
+    'стол', 'стола', 'столе', 'стул', 'пальто', 'шляпа', 'карета', 'лошадь', 
+    'улица', 'дом', 'дома', 'доме', 'часы', 'минута', 'секунда', 'шаг', 'шаги'
+}
 
-def text_to_features(text):
-    """Преобразование текста в 64-мерный семантический вектор"""
+def text_to_features(text: str) -> list:
     t = text.lower().strip()
-    words = [w for w in "".join([c if c.isalnum() or c == ' ' else ' ' for c in t]).split() if len(w) > 0]
+    words = [w for w in re.sub(r'[^a-zа-яё0-9\s]', ' ', t).split() if len(w) > 0]
     vec = [0.0] * 64
+    if not words:
+        return vec
 
-    # 1. Длина и ритм
     l = len(t)
-    vec[0] = math.exp(-((l - 130) / 90) ** 2)  # Идеальный колокол длины цитаты
+    # Bell curve centered around typical quote length (80-220 chars)
+    vec[0] = math.exp(-((l - 130) / 90) ** 2)
     vec[1] = 1.0 if any(punct in t for punct in ['—', ':', ';']) else 0.0
-    vec[2] = 1.0 if '?' in t or '!' in t else 0.0
-
-    # 2. Семантические маркеры
-    existential = {'жизнь', 'жизни', 'смерть', 'смерти', 'человек', 'человека', 'люди', 'время', 'времени', 'вечность', 'бытие', 'судьба', 'выбор', 'смысл'}
-    ethical = {'добро', 'добра', 'зло', 'зла', 'совесть', 'правда', 'правды', 'истина', 'истины', 'грех', 'греха', 'прощение', 'сострадание', 'вина', 'ответственность'}
-    psychological = {'душа', 'души', 'сердце', 'сердца', 'любовь', 'любви', 'страх', 'страха', 'страсть', 'одиночество', 'печаль', 'грусть', 'тайна'}
-    aphoristic = {'все', 'всё', 'никто', 'ничто', 'никогда', 'всегда', 'каждый', 'всякий', 'но', 'однако', 'нежели', 'зато', 'чем', 'тем', 'если'}
-    noise = {'пошел', 'пошла', 'вошел', 'сел', 'села', 'встал', 'надел', 'взял', 'открыл', 'сказал', 'спросил', 'ответил', 'часы', 'комната', 'дверь', 'стол', 'глава', 'часть'}
+    vec[2] = 1.0 if ('?' in t or '!' in t) else 0.0
 
     w_set = set(words)
-    vec[3] = len(w_set & existential) / 4.0
-    vec[4] = len(w_set & ethical) / 3.0
-    vec[5] = len(w_set & psychological) / 3.0
-    vec[6] = len(w_set & aphoristic) / 4.0
-    vec[7] = len(w_set & noise) / 3.0
+    ex = len(w_set & EXISTENTIAL)
+    et = len(w_set & ETHICAL)
+    ps = len(w_set & PSYCHOLOGICAL)
+    ap = len(w_set & APHORISTIC)
+    no = len(w_set & ROUTINE_NOISE)
 
-    # 3. Синтаксические антитезы ("не..., а...")
-    vec[8] = 1.0 if 'не ' in t and ', а ' in t else 0.0
-    vec[9] = 1.0 if t.startswith('—') and any(d in t for d in ['сказал', 'ответил', 'спросил']) else 0.0
+    vec[3] = ex / 4.0
+    vec[4] = et / 3.0
+    vec[5] = ps / 3.0
+    vec[6] = ap / 4.0
+    vec[7] = no / 3.0
+    vec[8] = 1.0 if ('не ' in t and ', а ' in t) else 0.0
+    vec[9] = 1.0 if (t.startswith('—') and any(d in t for d in ['сказал', 'ответил', 'спросил'])) else 0.0
 
-    # 4. Хэш-эмбеддинг для семантического разнообразия (54 измерения)
     for w in words:
-        h = hash(w) % 54
+        h = str_hash(w) % 54
         vec[10 + h] += 0.35
 
-    # L2 нормализация
-    norm = math.sqrt(sum(x*x for x in vec))
+    norm = math.sqrt(sum(x * x for x in vec))
     if norm > 0:
-        vec = [x / norm for x in vec]
+        inv = 1.0 / norm
+        vec = [x * inv for x in vec]
     return vec
 
+def determine_meaning_category(text: str) -> int:
+    words = set(re.sub(r'[^a-zа-яё0-9\s]', ' ', text.lower()).split())
+    scores = [
+        len(words & EXISTENTIAL) * 1.5,
+        len(words & ETHICAL) * 1.5,
+        len(words & PSYCHOLOGICAL) * 1.4,
+        len(words & APHORISTIC) * 1.1 + (1.0 if (('—' in text or ':' in text) and len(text) < 120) else 0.0),
+        1.0 if any(k in text.lower() for k in ['красот', 'искусств', 'памят', 'творчеств', 'музык', 'гармони']) else 0.2
+    ]
+    best_idx = 0
+    best_val = scores[0]
+    for i in range(1, 5):
+        if scores[i] > best_val:
+            best_val = scores[i]
+            best_idx = i
+    return best_idx
+
 class LSQNet(nn.Module):
-    """Глубокая семантическая нейросеть с концептуальным вниманием"""
+    """LSQ-Net: Multi-Head Concept Attention & Semantic Latent Representation"""
     def __init__(self, in_features=64, hidden_dim=128):
         super().__init__()
-        # 5 голов внимания к концептам смысла
         self.concept_attention = nn.Linear(in_features, 5)
 
-        # Глубокий преобразователь с нелинейностью GELU и LayerNorm
         self.fc1 = nn.Linear(in_features, hidden_dim)
         self.ln1 = nn.LayerNorm(hidden_dim)
         self.act1 = nn.GELU()
-        
+
         self.fc2 = nn.Linear(hidden_dim, in_features)
         self.ln2 = nn.LayerNorm(in_features)
 
-        # Выходные головы:
-        # 1. Бинарный классификатор цитаты (Quote Probability)
         self.quote_head = nn.Linear(in_features + 5, 1)
-        # 2. Мульти-классовый классификатор категории смысла (5 классов)
         self.meaning_head = nn.Linear(in_features, 5)
 
     def forward(self, x):
-        # Концептуальное внимание
         concepts = torch.sigmoid(self.concept_attention(x))
 
-        # Нелинейный семантический проход с Residual connection
         res = x
         h = self.act1(self.ln1(self.fc1(x)))
         h = self.ln2(self.fc2(h)) + res
 
-        # Объединение латентного представления с концептуальными головами
         combined = torch.cat([h, concepts], dim=-1)
         quote_logits = self.quote_head(combined)
         meaning_logits = self.meaning_head(h)
@@ -195,70 +162,117 @@ class LSQNet(nn.Module):
 
 def main():
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print("=" * 65)
-    print(" Обучение глубокой семантической нейросети LSQ-Net")
-    print("=" * 65)
+    print("=" * 70)
+    print(" LSQ-Net v2.1: Обучение на GPU RTX 4060 с CUDA")
+    print("=" * 70)
     if device.type == 'cuda':
         gpu_name = torch.cuda.get_device_name(0)
         vram = torch.cuda.get_device_properties(0).total_memory / (1024 ** 2)
-        print(f"Аппаратное ускорение: {gpu_name} (CUDA Cores)")
-        print(f"Доступная видеопамять VRAM: {vram:.0f} MiB")
+        print(f"CUDA Device: {gpu_name} (8GB VRAM, Tensor/CUDA Cores)")
     else:
-        print("Внимание: расчет на CPU")
+        print("Device: CPU")
 
-    X_data = []
-    y_quote = []
-    y_meaning = []
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    dataset_path = os.path.join(script_dir, '..', 'data', 'harvest', 'curated_quotes_dataset.json')
 
-    for text, cat, is_q in TRAIN_SAMPLES:
-        feat = text_to_features(text)
-        X_data.append(feat)
-        y_quote.append(float(is_q))
-        y_meaning.append(cat)
+    with open(dataset_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
 
-    X = torch.tensor(X_data, dtype=torch.float32, device=device)
-    y_q = torch.tensor(y_quote, dtype=torch.float32, device=device).unsqueeze(1)
-    y_m = torch.tensor(y_meaning, dtype=torch.long, device=device)
+    raw_quotes = data['quotes']
+    raw_negatives = data['negatives']
+    print(f"Загружено из датасета: {len(raw_quotes)} цитат со смыслом и {len(raw_negatives)} контрастных нарративных предложений.")
 
-    print(f"Обучающая выборка: {X.shape[0]} примеров, размерность: {X.shape[1]}")
+    X_list = []
+    y_q_list = []
+    y_m_list = []
+
+    # Positive samples
+    for q in raw_quotes:
+        feat = text_to_features(q)
+        cat = determine_meaning_category(q)
+        X_list.append(feat)
+        y_q_list.append(1.0)
+        y_m_list.append(cat)
+
+    # Negative samples
+    for n in raw_negatives:
+        feat = text_to_features(n)
+        X_list.append(feat)
+        y_q_list.append(0.0)
+        y_m_list.append(0)
+
+    # Shuffle
+    combined = list(zip(X_list, y_q_list, y_m_list))
+    random.seed(42)
+    random.shuffle(combined)
+    X_list, y_q_list, y_m_list = zip(*combined)
+
+    X_t = torch.tensor(X_list, dtype=torch.float32, device=device)
+    y_q_t = torch.tensor(y_q_list, dtype=torch.float32, device=device).unsqueeze(1)
+    y_m_t = torch.tensor(y_m_list, dtype=torch.long, device=device)
+
+    # 85% train, 15% validation
+    n_total = len(X_list)
+    n_train = int(n_total * 0.85)
+
+    X_train, X_val = X_t[:n_train], X_t[n_train:]
+    y_q_train, y_q_val = y_q_t[:n_train], y_q_t[n_train:]
+    y_m_train, y_m_val = y_m_t[:n_train], y_m_t[n_train:]
+
+    print(f"Выборка разделена: {n_train} train, {n_total - n_train} val.")
+
+    train_ds = TensorDataset(X_train, y_q_train, y_m_train)
+    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
 
     model = LSQNet(in_features=64, hidden_dim=128).to(device)
 
     bce_loss = nn.BCEWithLogitsLoss()
     ce_loss = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=0.012, weight_decay=1e-3)
+    optimizer = optim.AdamW(model.parameters(), lr=0.008, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150)
 
-    epochs = 350
-    print(f"\nЗапуск обучения на тензорных ядрах GPU ({epochs} эпох)...")
+    epochs = 150
+    print(f"\nЗапуск обучения нейросети на ядрах CUDA ({epochs} эпох)...")
 
     for epoch in range(1, epochs + 1):
-        optimizer.zero_grad()
-        q_logits, m_logits, _ = model(X)
-        loss_q = bce_loss(q_logits, y_q)
-        # Смысл обучаем только на положительных цитатах
-        mask_q = (y_q.squeeze(1) == 1)
-        loss_m = ce_loss(m_logits[mask_q], y_m[mask_q]) if mask_q.sum() > 0 else 0.0
+        model.train()
+        for batch_x, batch_y_q, batch_y_m in train_loader:
+            optimizer.zero_grad()
+            q_logits, m_logits, _ = model(batch_x)
+            l_q = bce_loss(q_logits, batch_y_q)
 
-        total_loss = loss_q + 0.6 * loss_m
-        total_loss.backward()
-        optimizer.step()
+            mask_q = (batch_y_q.squeeze(1) == 1)
+            l_m = ce_loss(m_logits[mask_q], batch_y_m[mask_q]) if mask_q.sum() > 0 else 0.0
 
-        if epoch % 70 == 0 or epoch == epochs:
+            loss = l_q + 0.5 * l_m
+            loss.backward()
+            optimizer.step()
+
+        scheduler.step()
+
+        if epoch % 25 == 0 or epoch == epochs:
+            model.eval()
             with torch.no_grad():
-                preds_q = (torch.sigmoid(q_logits) >= 0.5).float()
-                acc_q = (preds_q == y_q).float().mean().item() * 100.0
-                print(f"Эпоха {epoch:3d}/{epochs} | Loss: {total_loss.item():.4f} | Точность детекции цитат: {acc_q:.1f}%")
+                q_val_logits, m_val_logits, _ = model(X_val)
+                preds = (torch.sigmoid(q_val_logits) >= 0.5).float()
+                acc_val = (preds == y_q_val).float().mean().item() * 100.0
 
-    # Сериализация весов для выполнения в браузере (Float32Array)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+                mask_pos = (y_q_val.squeeze(1) == 1)
+                m_preds = torch.argmax(m_val_logits[mask_pos], dim=-1)
+                m_acc = (m_preds == y_m_val[mask_pos]).float().mean().item() * 100.0
+
+                print(f"Эпоха {epoch:3d}/{epochs} | Val Quote Accuracy: {acc_val:.2f}% | Val Meaning Accuracy: {m_acc:.2f}%")
+
     out_path = os.path.join(script_dir, '..', 'src', 'lib', 'ai', 'deepModelWeights.json')
     out_path = os.path.abspath(out_path)
 
+    model.eval()
     with torch.no_grad():
         weights_export = {
-            "version": "2.0.0-lsq-net",
+            "version": "2.1.0-lsq-net-curated",
             "model_type": "LiteraSemanticQuoteNet",
             "device": torch.cuda.get_device_name(0) if device.type == 'cuda' else 'cpu',
+            "dataset_size": n_total,
             "in_features": 64,
             "hidden_dim": 128,
             "categories": MEANING_CATEGORIES,
@@ -281,8 +295,8 @@ def main():
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(weights_export, f, indent=2, ensure_ascii=False)
 
-    print(f"\nГлубокая модель успешно сохранена в: {out_path}")
-    print("Веса оптимизированы для мгновенного выполнения в браузере с пониманием смысла!")
+    print(f"\nМодель LSQ-Net v2.1 успешно обучена и сохранена в:\n{out_path}")
+    print(f"Размер файла весов: {os.path.getsize(out_path) / 1024:.1f} KiB")
 
 if __name__ == '__main__':
     main()

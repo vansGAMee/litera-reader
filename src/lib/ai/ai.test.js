@@ -49,11 +49,13 @@ describe('Deep Neural Model (LSQ-Net / RTX 4060)', () => {
 
   it('adapts personal concept multipliers on user feedback', () => {
     const sample = 'Красота — это страшная и ужасная вещь! Тут дьявол с богом борется, а поле битвы — сердца людей.'
-    const prevMult = deepModel.personalConceptMultipliers[4]
+    const res = deepModel.forward(sample)
+    const cat = res.meaningIndex
+    const prevMult = deepModel.personalConceptMultipliers[cat]
 
     deepModel.learn(sample, true)
     expect(deepModel.likeCount).toBe(1)
-    expect(deepModel.personalConceptMultipliers[4]).toBeGreaterThan(prevMult)
+    expect(deepModel.personalConceptMultipliers[cat]).toBeGreaterThan(prevMult)
   })
 })
 

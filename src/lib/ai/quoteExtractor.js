@@ -28,13 +28,17 @@ export function cleanCandidateText(raw = '') {
 }
 
 export function isGarbageCandidate(text) {
-  if (!text || text.length < 32 || text.length > 380) return true
+  if (!text || text.length < 42 || text.length > 380) return true
   const words = text.split(/\s+/).filter(Boolean)
-  if (words.length < 5) return true
+  if (words.length < 6) return true
 
   // Отсекаем заголовки глав и технические пометки
   if (TECHNICAL_HEADERS.test(text)) return true
   if (TECHNICAL_METADATA.test(text)) return true
+
+  // Отсекаем бытовые диалоговые реплики и чистые физические действия персонажей
+  if (/^(?:да|нет|слышали|батюшка|мать|здравствуйте|прощайте|послушайте|гляди|поди|ну вот|пожалуй|у меня)\b/i.test(text)) return true
+  if (/\b(?:вошел в комнату|сел на стул|встал со стула|пожал плечами|надел пальто|зажег свечу|выпил воды|открыл дверь)\b/i.test(text)) return true
 
   // Отсекаем строки, где мало букв (например формулы, оглавления из точек)
   const letters = text.replace(/[^a-zа-яё]/gi, '')
@@ -150,6 +154,10 @@ export async function extractQuotesFromBook(book, model = globalDeepModel, optio
     const item = candidates[i]
     // Прямой проход глубокой нейросети
     const result = model.forward(item.text)
+    const feat = result.features
+    const semDensity = (feat[3] + feat[4] + feat[5] + feat[6])
+    const noisePenalty = feat[7] * 1.5
+    const antithesisBonus = feat[8] * 0.25
 
     // Контраст со средним фоном книги (смысловой пик)
     const backgroundSim = cosineSimilarity(result.features, bookContext)
@@ -157,7 +165,7 @@ export async function extractQuotesFromBook(book, model = globalDeepModel, optio
     const peakContrast = Math.max(0, 1.0 - backgroundSim * 0.8)
 
     // Итоговый семантический балл
-    const combinedScore = (result.quoteProb * 0.65) + (peakContrast * 0.20) + (result.depthScore * 0.15)
+    const combinedScore = (result.quoteProb * 0.45) + (semDensity * 0.30) - noisePenalty + antithesisBonus + (peakContrast * 0.15) + (result.depthScore * 0.10)
     const percentMatch = Math.round(Math.min(99, Math.max(1, combinedScore * 100)))
 
     // Приблизительная страница в книге
@@ -190,5 +198,26 @@ export async function extractQuotesFromBook(book, model = globalDeepModel, optio
 
   // Сортировка по итоговой оценке глубокой модели
   scored.sort((a, b) => b.combinedScore - a.combinedScore)
-  return scored.slice(0, limit)
+
+  // Умная дедупликация пересекающихся вариантов цитат
+  const deduplicated = []
+  for (const q of scored) {
+    const qWords = new Set(q.text.toLowerCase().replace(/[^a-zа-яё]/g, ' ').split(/\s+/).filter(w => w.length > 3))
+    const isOverlap = deduplicated.some(existing => {
+      if (existing.text.includes(q.text) || q.text.includes(existing.text)) return true
+      const exWords = new Set(existing.text.toLowerCase().replace(/[^a-zа-яё]/g, ' ').split(/\s+/).filter(w => w.length > 3))
+      let common = 0
+      for (const w of qWords) {
+        if (exWords.has(w)) common++
+      }
+      const similarity = common / Math.max(1, Math.min(qWords.size, exWords.size))
+      return similarity >= 0.5
+    })
+    if (!isOverlap) {
+      deduplicated.push(q)
+    }
+    if (deduplicated.length >= limit) break
+  }
+
+  return deduplicated
 }

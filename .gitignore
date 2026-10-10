@@ -8,3 +8,4 @@ stitch_digital_publishing_book_reader_ui.zip
 /test-results/
 /playwright-report/
 /artifacts/
+data/harvest/*.txt
