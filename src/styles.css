@@ -151,3 +151,73 @@ body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bot
 
 .trainer-toast{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);background:#181713;color:#faf4e6;padding:12px 18px;font:500 12px 'Space Grotesk';display:flex;align-items:center;gap:8px;box-shadow:4px 4px 0 #9e2b1c;z-index:99}
 
+/* Topbar QR sync button */
+.top-actions{display:flex;align-items:center;gap:10px}
+.sync-button{background:#ebe3d1;color:#181713;border:1px solid #bfb39e;padding:12px 16px;text-transform:uppercase;letter-spacing:.1em;font-size:10px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer;transition:all .18s ease}
+.sync-button:hover{background:#191815;color:#faf6eb;border-color:#191815;transform:translate(-2px,-2px);box-shadow:3px 3px 0 #a13223}
+
+/* Serverless QR Sync Modal */
+.sync-modal-backdrop{display:grid;place-items:center;padding:16px;z-index:95}
+.sync-modal-dialog{background:#f5efe2;color:#1c1b18;width:min(480px,100%);border:1px solid #c8bead;box-shadow:0 24px 48px rgba(0,0,0,.35);padding:24px;animation:modalPop .25s cubic-bezier(.2,.8,.2,1);max-height:92vh;overflow-y:auto}
+@keyframes modalPop{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.sync-modal-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #d2c7b5;padding-bottom:14px}
+.sync-modal-header small{font:600 9px 'Space Grotesk';color:#9e2b1c;letter-spacing:.15em;text-transform:uppercase}
+.sync-modal-header h2{font:500 26px 'Oswald';text-transform:uppercase;margin:4px 0 0}
+.sync-modal-close{border:0;background:none;cursor:pointer;color:#756c5e;padding:4px}
+.sync-modal-close:hover{color:#181713}
+.sync-modal-tabs{display:flex;gap:8px;margin:18px 0;border-bottom:1px solid #d2c7b5;padding-bottom:12px}
+.sync-tab-btn{display:flex;align-items:center;gap:8px;padding:10px 16px;border:1px solid #c9bea9;background:#eee7d7;font:600 11px 'Oswald';text-transform:uppercase;letter-spacing:.08em;cursor:pointer;transition:all .15s}
+.sync-tab-btn.active{background:#181713;color:#faf4e6;border-color:#181713}
+.sync-show-pane{display:flex;flex-direction:column;align-items:center;text-align:center}
+.qr-wrapper{background:#f5efe2;padding:16px;border:1px solid #cfc4b1;box-shadow:4px 4px 0 rgba(0,0,0,.08);margin-bottom:14px}
+.qr-canvas{display:block;max-width:100%;height:auto}
+.sync-hint{font:14px/1.45 'EB Garamond';color:#60584b;margin:6px 0 18px;max-width:380px}
+.sync-actions-row{display:flex;gap:10px;width:100%;justify-content:center;flex-wrap:wrap}
+.sync-action-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;background:#181713;color:#faf4e6;border:0;cursor:pointer;font:600 10px 'Oswald';letter-spacing:.08em;text-transform:uppercase;transition:all .18s}
+.sync-action-btn:hover{background:#9e2b1c}
+.sync-action-btn:disabled{opacity:.5;cursor:default}
+
+.sync-scan-pane{display:flex;flex-direction:column;align-items:center}
+.camera-viewfinder{position:relative;width:100%;aspect-ratio:1;max-width:280px;background:#000;border:1px solid #c8bead;overflow:hidden;box-shadow:inset 0 0 20px rgba(0,0,0,.8)}
+.camera-video{width:100%;height:100%;object-fit:cover}
+.viewfinder-frame{position:absolute;inset:20px;pointer-events:none}
+.viewfinder-frame .corner{position:absolute;width:18px;height:18px;border-color:#faf4e6;border-style:solid;border-width:0}
+.viewfinder-frame .top-left{top:0;left:0;border-top-width:3px;border-left-width:3px}
+.viewfinder-frame .top-right{top:0;right:0;border-top-width:3px;border-right-width:3px}
+.viewfinder-frame .bottom-left{bottom:0;left:0;border-bottom-width:3px;border-left-width:3px}
+.viewfinder-frame .bottom-right{bottom:0;right:0;border-bottom-width:3px;border-right-width:3px}
+.laser-line{position:absolute;left:0;right:0;height:2px;background:#e63946;box-shadow:0 0 10px #e63946;animation:laserScan 2.2s linear infinite}
+@keyframes laserScan{0%{top:4%}50%{top:94%}100%{top:4%}}
+.scan-status-alert{width:100%;margin:14px 0 10px;padding:10px 14px;font:500 12px 'Space Grotesk';text-align:center;box-sizing:border-box}
+.scan-status-alert.status-error{background:#fbeae8;color:#9e2b1c;border:1px solid #f2bcba}
+.scan-status-alert.status-done{background:#e8f6ed;color:#1d734e;border:1px solid #bfe7d3}
+.scan-status-alert.status-scanning{background:#eee8da;color:#60584b;border:1px solid #d4cbb8}
+.scan-alternatives{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+.manual-code-accordion{width:100%;margin-top:18px;border-top:1px solid #d5cbba;padding-top:12px}
+.manual-code-accordion summary{font:600 11px 'Space Grotesk';color:#736b5d;cursor:pointer;margin-bottom:8px}
+.manual-code-form{display:flex;flex-direction:column;gap:8px}
+.manual-code-form textarea{width:100%;font:11px monospace;padding:8px;border:1px solid #c9bea9;background:#fffefa;box-sizing:border-box}
+
+/* Floating Safe-Zone Quote Action Bar (placed at top to never overlap with Google Translate) */
+.selection-floating-bar{position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:90;width:min(480px,calc(100% - 24px));animation:barIn .22s cubic-bezier(.2,.8,.2,1)}
+@keyframes barIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+.selection-pill{background:#171714;color:#faf5e9;border:1px solid rgba(255,255,255,.16);box-shadow:0 12px 28px rgba(0,0,0,.42),4px 4px 0 #9e2b1c;padding:7px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.selection-snippet{display:flex;align-items:center;gap:7px;font:italic 14px 'EB Garamond';color:#e0d8c8;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;flex:1}
+.selection-snippet svg{flex-shrink:0;color:#e8af38}
+.selection-snippet span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.selection-actions-group{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.save-quote-action{background:#9e2b1c;color:#fff;border:0;padding:7px 12px;font:600 11px 'Oswald';letter-spacing:.08em;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;gap:5px;transition:background .15s}
+.save-quote-action:hover{background:#b83424}
+.cancel-quote-action{background:rgba(255,255,255,.12);color:#ded6c5;border:0;width:28px;height:28px;display:grid;place-items:center;cursor:pointer;transition:background .15s}
+.cancel-quote-action:hover{background:rgba(255,255,255,.22);color:#fff}
+.quote-active-btn{background:#9e2b1c !important;color:#fff !important}
+
+/* Personal Reading Speed Profile UI */
+.personal-speed-badge{background:#fffefa;border:1px solid #d5cbba;padding:14px 18px;margin:12px 0 16px;display:flex;flex-direction:column;gap:8px}
+.speed-stat-main{display:flex;align-items:baseline;gap:8px}
+.speed-stat-num{font:700 28px/1 'Oswald';color:#9e2b1c}
+.speed-stat-lbl{font:600 11px 'Space Grotesk';text-transform:uppercase;letter-spacing:.08em;color:#6e675b}
+.speed-stat-desc{margin:0;font:13px/1.4 'EB Garamond';color:#6e675b}
+.reset-speed-link{border:0;background:none;color:#9e2b1c;font:600 10px 'Space Grotesk';text-transform:uppercase;letter-spacing:.08em;cursor:pointer;text-decoration:underline;padding:0;align-self:flex-start}
+
+

@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, Search, Settings2, Sparkles, StickyNote, Upload, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, QrCode, Search, Settings2, Sparkles, StickyNote, Upload, X } from 'lucide-react'
 import { get, set } from 'idb-keyval'
 import { formatReadingTime } from './lib/readingExtras.js'
 import { usePageGestures } from './lib/usePageGestures.js'
 import CoverEditor from './CoverEditor.jsx'
 import QuoteTrainer from './QuoteTrainer.jsx'
+import SyncModal from './SyncModal.jsx'
 import { App as NativeApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { seedBooks } from './data.js'
-import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, spreadProgress } from './lib/reader.js'
+import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate, resolveInitialPage, spreadProgress } from './lib/reader.js'
+import { calculateEstimatedMinutes, countWords, getReadingProfile, recordReadingSample, resetReadingProfile, saveReadingProfile } from './lib/readingTracker.js'
 import { importBook } from './lib/importBook.js'
 import { migrateStoredBooks } from './lib/migrateLibrary.js'
 
@@ -34,6 +36,7 @@ function Cover({ book, onClick, compact = false }) {
 function App() {
   const [editing, setEditing] = useState(null)
   const [aiTrainerBook, setAiTrainerBook] = useState(null)
+  const [syncOpen, setSyncOpen] = useState(false)
   const [importErrors, setImportErrors] = useState([])
   const importLock = useRef(false)
   const [books, setBooks] = useState(seedBooks)
@@ -52,11 +55,12 @@ function App() {
     if (!Capacitor.isNativePlatform()) return
     const listener = NativeApp.addListener('backButton', () => {
       if (editing) setEditing(null)
+      else if (syncOpen) setSyncOpen(false)
       else if (view === 'reader') setView('library')
       else NativeApp.minimizeApp()
     })
     return () => { listener.then(handle => handle.remove()) }
-  }, [view, editing])
+  }, [view, editing, syncOpen])
 
   useEffect(() => {
     get(STORAGE_KEY).then(async (saved) => {
@@ -105,7 +109,11 @@ function App() {
     <header className="topbar">
       <button className="brand" onClick={() => setView('library')}><span className="brand-mark">Л</span><span><b>Л И Т Е Р А</b><i>личное собрание</i></span></button>
       <nav><button className="active"><Library size={16}/>Библиотека</button><button onClick={() => visible[0] && openBook(visible[0].id)}><BookOpen size={16}/>Читать</button></nav>
-      <div className="top-actions"><button aria-label={uploading ? 'Обработка книг' : 'Добавить книгу'} disabled={uploading || !storageWritable} className="upload-button" onClick={() => fileRef.current?.click()}><Upload size={16}/><span>{uploading ? 'Обработка…' : 'Добавить книгу'}</span></button><button className="icon-button mobile"><Menu/></button></div>
+      <div className="top-actions">
+        <button aria-label="Синхронизация прогресса через QR-код" className="sync-button" onClick={() => setSyncOpen(true)} title="Синхронизация через QR-код"><QrCode size={16}/><span>Синхронизация</span></button>
+        <button aria-label={uploading ? 'Обработка книг' : 'Добавить книгу'} disabled={uploading || !storageWritable} className="upload-button" onClick={() => fileRef.current?.click()}><Upload size={16}/><span>{uploading ? 'Обработка…' : 'Добавить книгу'}</span></button>
+        <button className="icon-button mobile"><Menu/></button>
+      </div>
       <input ref={fileRef} hidden multiple type="file" accept="*/*" onChange={(e) => { handleFiles(e.target.files); e.target.value = '' }} />
     </header>
 
@@ -151,6 +159,11 @@ function App() {
       setActiveId(aiTrainerBook.id)
       setView('reader')
     }} />}
+    {syncOpen && <SyncModal books={books} onSyncApply={(updated, msg) => {
+      setBooks(updated)
+      setToast(msg)
+      setSyncOpen(false)
+    }} onClose={() => setSyncOpen(false)} />}
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
@@ -158,7 +171,6 @@ function App() {
 function Reader({ book, onBack, onChange }) {
   const [fontSize, setFontSize] = useState(+localStorage.getItem('litera-font') || 19)
   const [theme, setTheme] = useState(localStorage.getItem('litera-theme') || 'paper')
-  const [speed, setSpeed] = useState(() => Math.max(100, Math.min(450, +localStorage.getItem('litera-speed') || 215)))
   const [pageSeconds, setPageSeconds] = useState(() => Math.max(30, Math.min(180, +localStorage.getItem('litera-page-seconds') || 60)))
   const [turn, setTurn] = useState(1)
   const [panel, setPanel] = useState(null)
@@ -166,41 +178,121 @@ function Reader({ book, onBack, onChange }) {
   const [notes, setNotes] = useState(book.notes || [])
   const [trainerOpen, setTrainerOpen] = useState(false)
   const [selected, setSelected] = useState('')
-  const locationRef = useRef(book.progress || 0)
-  const skipInitialPersist = useRef(true)
-  const panelRef = useRef(null)
-  const panelOpener = useRef(null)
   const pageSize = fontSize >= 22 ? 1150 : fontSize <= 17 ? 2000 : 1550
   const isVisual = book.kind === 'visual'
   const visualCount = book.sourceFormat === 'PDF' ? book.pageCount : book.pages?.length
   const pages = useMemo(() => isVisual ? Array.from({ length: visualCount || 1 }, () => '') : paginate(normalizeText(book.text || ''), pageSize), [book.text, pageSize, isVisual, visualCount])
-  const [page, setPage] = useState(() => pageFromProgress(book.progress || 0, pages.length))
-  const [mobile, setMobile] = useState(() => matchMedia('(max-width: 760px)').matches)
-  const current = Math.min(page, Math.max(0, pages.length - 1))
-  const pct = spreadProgress(current, pages.length, mobile)
-  const remaining = useMemo(() => isVisual ? Math.ceil((pages.length - current) * pageSeconds / 60) : estimateMinutes(pages.slice(current).join(' '), speed), [isVisual, pages, current, pageSeconds, speed])
-  useEffect(() => { localStorage.setItem('litera-speed', speed); localStorage.setItem('litera-page-seconds', pageSeconds) }, [speed, pageSeconds])
 
+  // Exact page resolution without +2 off-by-two bug:
+  const isMobileView = () => typeof window !== 'undefined' && (window.innerWidth <= 760 || (window.matchMedia && window.matchMedia('(max-width: 760px)').matches))
+  const [mobile, setMobile] = useState(isMobileView)
+  const [page, setPage] = useState(() => resolveInitialPage(book, pages.length))
+  const locationRef = useRef(resolveInitialPage(book, pages.length))
+  const skipInitialPersist = useRef(true)
+  const panelRef = useRef(null)
+  const panelOpener = useRef(null)
+
+  // Smart reading speed profile with AFK detection
+  const [profile, setProfile] = useState(getReadingProfile)
+  const activeSecondsRef = useRef(0)
+  const lastActiveTimeRef = useRef(performance.now())
+  const isIdleRef = useRef(false)
+  const current = Math.min(page, Math.max(0, pages.length - 1))
+  const previousPageRef = useRef(current)
+
+  const pct = spreadProgress(current, pages.length, mobile)
+  const remainingWords = useMemo(() => isVisual ? 0 : countWords(pages.slice(current).join(' ')), [isVisual, pages, current])
+  const remaining = useMemo(() => isVisual ? Math.ceil((pages.length - current) * pageSeconds / 60) : calculateEstimatedMinutes(remainingWords, profile.wpm), [isVisual, pages, current, pageSeconds, remainingWords, profile.wpm])
+
+  useEffect(() => { localStorage.setItem('litera-page-seconds', pageSeconds) }, [pageSeconds])
   useEffect(() => { localStorage.setItem('litera-font', fontSize); localStorage.setItem('litera-theme', theme) }, [fontSize, theme])
-  useEffect(() => { const media = matchMedia('(max-width: 760px)'); const update = () => setMobile(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update) }, [])
-  useEffect(() => { setPage(pageFromProgress(locationRef.current, pages.length)) }, [pages.length])
-  useEffect(() => { if (skipInitialPersist.current) { skipInitialPersist.current = false; return } onChange(book.id, { progress: pct, notes }) }, [current, notes])
+
+  useEffect(() => {
+    const update = () => setMobile(isMobileView())
+    window.addEventListener('resize', update)
+    const media = matchMedia('(max-width: 760px)')
+    media.addEventListener('change', update)
+    return () => {
+      window.removeEventListener('resize', update)
+      media.removeEventListener('change', update)
+    }
+  }, [])
+
+  useEffect(() => {
+    setPage(resolveInitialPage(book, pages.length))
+  }, [pages.length])
+
+  // Persist current page index and progress safely
+  useEffect(() => {
+    if (skipInitialPersist.current) { skipInitialPersist.current = false; return }
+    onChange(book.id, { progress: pct, currentPage: current, notes })
+  }, [current, notes])
+
+  // AFK detection & reading interval tracker
+  useEffect(() => {
+    if (previousPageRef.current !== current) {
+      const prevPage = previousPageRef.current
+      previousPageRef.current = current
+      const wordsOnPage = isVisual ? 0 : countWords(pages[prevPage] || '')
+      const elapsed = activeSecondsRef.current
+      activeSecondsRef.current = 0
+      lastActiveTimeRef.current = performance.now()
+      isIdleRef.current = false
+
+      if (!isVisual && wordsOnPage >= 10 && elapsed >= 3) {
+        const result = recordReadingSample(wordsOnPage, elapsed, profile)
+        if (result.updated) setProfile(result.profile)
+      }
+    }
+  }, [current, isVisual, pages, profile])
+
+  useEffect(() => {
+    const markActive = () => {
+      lastActiveTimeRef.current = performance.now()
+      isIdleRef.current = false
+    }
+    const events = ['pointerdown', 'touchstart', 'scroll', 'keydown']
+    events.forEach(evt => window.addEventListener(evt, markActive, { passive: true }))
+
+    const timer = setInterval(() => {
+      if (document.hidden) return
+      const now = performance.now()
+      if (now - lastActiveTimeRef.current > 60000) {
+        isIdleRef.current = true
+      } else {
+        activeSecondsRef.current += 1
+      }
+    }, 1000)
+
+    return () => {
+      events.forEach(evt => window.removeEventListener(evt, markActive))
+      clearInterval(timer)
+    }
+  }, [])
+
+  const handleBack = () => {
+    onChange(book.id, { progress: pct, currentPage: current, notes })
+    onBack()
+  }
+
   useEffect(() => {
     if (!panel) return
     const dialog = panelRef.current; const focusable = () => [...dialog.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
     const trap = (e) => { if (e.key !== 'Tab') return; const items = focusable(); if (!items.length) return; const first = items[0]; const last = items.at(-1); if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() } }
     dialog.addEventListener('keydown', trap); return () => dialog.removeEventListener('keydown', trap)
   }, [panel])
+
   const closePanel = () => { setPanel(null); setTimeout(() => panelOpener.current?.focus(), 0) }
   const openPanel = (name, event) => { panelOpener.current = event.currentTarget; setPanel(panel === name ? null : name) }
   const jumpPage = (target) => {
     const next = Math.max(0, Math.min(target, pages.length - 1))
     setTurn(next >= current ? 1 : -1)
-    locationRef.current = spreadProgress(next, pages.length, mobile)
+    locationRef.current = next
     setPage(next)
   }
   const movePage = delta => jumpPage(current + delta)
   const gestures = usePageGestures(direction => movePage(direction * (mobile ? 1 : 2)), !!panel)
+
   useEffect(() => {
     const keys = (e) => {
       if (e.key === 'Escape' && panel) { closePanel(); return }
@@ -212,28 +304,73 @@ function Reader({ book, onBack, onChange }) {
     }
     addEventListener('keydown', keys); return () => removeEventListener('keydown', keys)
   }, [current, pages.length, mobile, panel])
+
   useEffect(() => { document.querySelector('.reading-desk')?.scrollTo({ top: 0 }); document.querySelectorAll('.paper').forEach((paper) => paper.scrollTo({ top: 0 })) }, [current])
 
-  const captureSelection = () => { const text = window.getSelection()?.toString().trim(); if (text) setSelected(text) }
-  const addNote = () => { if (!selected) return; const note = prompt('Заметка к цитате (можно оставить пустой):') ?? ''; setNotes((all) => [{ id: Date.now(), quote: selected, note, page: current + 1 }, ...all]); setSelected(''); window.getSelection()?.removeAllRanges() }
+  const captureSelection = () => {
+    const text = window.getSelection()?.toString().trim()
+    if (text) setSelected(text)
+  }
+  const addNote = () => {
+    if (!selected) return
+    const note = prompt('Заметка к цитате (можно оставить пустой):') ?? ''
+    setNotes((all) => [{ id: Date.now(), quote: selected, note, page: current + 1 }, ...all])
+    setSelected('')
+    window.getSelection()?.removeAllRanges()
+  }
 
   return <div className={`reader theme-${theme} ${focus ? 'is-focus' : ''}`} style={{ '--reading-size': `${fontSize}px`, '--turn-offset': `${turn * 16}px` }}>
     <header className="reader-top">
-      <button className="reader-brand" onClick={onBack}><span>Л</span><i>ЛИТЕРА</i></button>
-      <button className="back" onClick={onBack}><ArrowLeft size={17}/> Библиотека</button>
+      <button className="reader-brand" onClick={handleBack}><span>Л</span><i>ЛИТЕРА</i></button>
+      <button className="back" onClick={handleBack}><ArrowLeft size={17}/> Библиотека</button>
       <div className="reader-title"><b>{book.title}</b><span>{book.author}</span></div>
-      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Цитаты" onClick={() => setTrainerOpen(true)} title="Избранные цитаты" className="ai-quote-trigger"><Sparkles size={18}/><span>Цитаты</span></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
+      <div className="reader-actions">
+        <button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button>
+        {selected ? (
+          <button aria-label="Сохранить выделенную цитату" onClick={addNote} title="Сохранить цитату" className="ai-quote-trigger quote-active-btn">
+            <Highlighter size={18}/><span>Сохранить</span>
+          </button>
+        ) : (
+          <button aria-label="Цитаты" onClick={() => setTrainerOpen(true)} title="Избранные цитаты" className="ai-quote-trigger"><Sparkles size={18}/><span>Цитаты</span></button>
+        )}
+        <button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/></button>
+        <button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button>
+      </div>
     </header>
-    <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> <span aria-label="Осталось читать">≈ {formatReadingTime(remaining)} до конца</span></span></div>
+
+    <div className="reader-status">
+      <span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span>
+      <div><i style={{ width: `${pct}%` }}/></div>
+      <span><Clock3 size={14}/> <span aria-label="Осталось читать">≈ {formatReadingTime(remaining)} до конца ({profile.wpm} сл/мин)</span></span>
+    </div>
+
+    {/* Floating safe-zone quote bar for mobile (placed at top to never overlap with Google Translate) */}
+    {!isVisual && selected && (
+      <aside className="selection-floating-bar" aria-label="Сохранение цитаты">
+        <div className="selection-pill">
+          <div className="selection-snippet">
+            <Highlighter size={14}/>
+            <span>«{selected.slice(0, 32)}{selected.length > 32 ? '…' : ''}»</span>
+          </div>
+          <div className="selection-actions-group">
+            <button className="save-quote-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}>
+              <Check size={14}/> Сохранить цитату
+            </button>
+            <button className="cancel-quote-action" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSelected(''); window.getSelection()?.removeAllRanges(); }} aria-label="Снять выделение">
+              <X size={14}/>
+            </button>
+          </div>
+        </div>
+      </aside>
+    )}
 
     <main className="reading-desk" {...gestures}>
       {isVisual ? <VisualSpread key={current} book={book} current={current} /> : <div key={current} className="spread" onMouseUp={captureSelection} onTouchEnd={() => setTimeout(captureSelection, 100)}>
         <div className="paper page-left"><div className="running"><span>{book.author}</span><em>ЛИТЕРА · ЛИЧНОЕ СОБРАНИЕ</em></div><PageText text={pages[current]} first={current === 0}/><div className="folio"><span>{current + 1}</span><i>{book.title}</i></div></div>
         <div className="paper page-right"><div className="bookmark-ribbon"/><div className="running"><em>ЭКСКЛЮЗИВНАЯ КЛАССИКА</em><span>{book.title}</span></div><PageText text={pages[current + 1] || ''}/><div className="folio"><i>{book.author}</i><span>{Math.min(current + 2, pages.length)}</span></div></div>
       </div>}
-
-      {!isVisual && selected && <button className="selection-action" onMouseDown={(e) => e.preventDefault()} onClick={addNote}><Highlighter size={15}/> Сохранить цитату</button>}
     </main>
+
     <nav className="reader-navigation" aria-label="Перелистывание">
       <button aria-label="Предыдущая страница" disabled={current === 0} onClick={() => movePage(-(mobile ? 1 : 2))}><ArrowLeft/></button>
       <label className="page-slider"><span>{current + 1} / {pages.length} стр. · {pct}%<small>Свайп или тап по краям</small></span><input aria-label="Перейти к странице" type="range" min="1" max={pages.length} value={current + 1} onChange={e => jumpPage(+e.target.value - 1)}/></label>
@@ -242,7 +379,53 @@ function Reader({ book, onBack, onChange }) {
     <footer className="reader-bottom"><span><i className="live"/> Режим чтения</span><span>Шрифт: EB Garamond · {fontSize}px</span><button onClick={(e) => openPanel('notes', e)}><Bookmark size={15}/> Заметки и цитаты · {notes.length}</button><span className="shortcuts">← → листать · F фокус</span></footer>
 
     {panel && <div className="panel-backdrop" onClick={closePanel}><aside ref={panelRef} className="side-panel" role="dialog" aria-modal="true" aria-label={panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'} onClick={(e) => e.stopPropagation()}><div className="panel-head"><div><small>{panel === 'settings' ? 'ВИД ИЗДАНИЯ' : 'ПОЛЯ ЧИТАТЕЛЯ'}</small><h2>{panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'}</h2></div><button aria-label="Закрыть" autoFocus onClick={closePanel}><X/></button></div>
-      {panel === 'settings' ? <div className="settings-list"><section className="reading-estimate"><b>≈ {formatReadingTime(remaining)} до конца</b><p>{isVisual ? 'Приблизительно: по времени на одну страницу, включая текущую.' : 'По объёму оставшегося текста, включая текущую страницу.'}</p><label>{isVisual ? 'Секунд на страницу' : 'Слов в минуту'}<b>{isVisual ? pageSeconds : speed}</b></label><input aria-label={isVisual ? 'Секунд на страницу' : 'Скорость чтения'} type="range" min={isVisual ? 30 : 100} max={isVisual ? 180 : 450} step={isVisual ? 15 : 5} value={isVisual ? pageSeconds : speed} onChange={e => isVisual ? setPageSeconds(+e.target.value) : setSpeed(+e.target.value)}/></section><section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section><section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section><section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section></div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
+      {panel === 'settings' ? <div className="settings-list">
+        <section className="reading-estimate">
+          <b>≈ {formatReadingTime(remaining)} до конца</b>
+          <p>{isVisual ? 'Приблизительно: по времени на одну страницу, включая текущую.' : 'Умный расчёт по вашей персональной скорости (паузы и AFK исключаются).'}</p>
+          <div className="personal-speed-badge">
+            <div className="speed-stat-main">
+              <span className="speed-stat-num">{profile.wpm}</span>
+              <span className="speed-stat-lbl">слов / мин (WPM)</span>
+            </div>
+            <p className="speed-stat-desc">
+              {profile.sampleCount > 0
+                ? `Откалибровано по ${profile.sampleCount} страницам (${profile.totalWords} слов)`
+                : 'Адаптивный алгоритм: скорость подстраивается автоматически при чтении.'}
+            </p>
+            {profile.sampleCount > 0 && (
+              <button
+                className="reset-speed-link"
+                onClick={() => setProfile(resetReadingProfile())}
+                title="Сбросить историю и начать калибровку заново"
+              >
+                Сбросить калибровку
+              </button>
+            )}
+          </div>
+          <label>{isVisual ? 'Секунд на страницу' : 'Ручная подстройка скорости'}<b>{isVisual ? pageSeconds : profile.wpm}</b></label>
+          <input
+            aria-label={isVisual ? 'Секунд на страницу' : 'Скорость чтения'}
+            type="range"
+            min={isVisual ? 30 : 100}
+            max={isVisual ? 180 : 450}
+            step={isVisual ? 15 : 5}
+            value={isVisual ? pageSeconds : profile.wpm}
+            onChange={e => {
+              if (isVisual) {
+                setPageSeconds(+e.target.value)
+              } else {
+                const custom = { ...profile, wpm: +e.target.value, isCustom: true }
+                setProfile(custom)
+                saveReadingProfile(custom)
+              }
+            }}
+          />
+        </section>
+        <section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section>
+        <section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section>
+        <section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section>
+      </div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
     </aside></div>}
     {trainerOpen && <QuoteTrainer book={book} onClose={() => setTrainerOpen(false)} onSaveQuote={(quoteData) => {
       setNotes((all) => [{ id: Date.now(), ...quoteData }, ...all])

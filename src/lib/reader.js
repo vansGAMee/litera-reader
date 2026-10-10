@@ -60,6 +60,14 @@ export function pageFromProgress(progress, total) {
   return Math.max(0, Math.min(total - 1, Math.ceil((Math.max(0, Math.min(100, progress)) / 100) * total) - 1))
 }
 
+export function resolveInitialPage(book = {}, total = 1) {
+  if (!Number.isFinite(total) || total <= 0) return 0
+  if (typeof book.currentPage === 'number' && Number.isFinite(book.currentPage)) {
+    return Math.max(0, Math.min(total - 1, Math.round(book.currentPage)))
+  }
+  return pageFromProgress(book.progress || 0, total)
+}
+
 export function getInitials(author = '') {
   return author.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')
 }

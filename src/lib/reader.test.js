@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateMinutes, getInitials, needsVisualPdf, normalizeText, pageFromProgress, paginate, readingProgress, repairMojibake, spreadProgress } from './reader.js'
+import { estimateMinutes, getInitials, needsVisualPdf, normalizeText, pageFromProgress, paginate, readingProgress, repairMojibake, resolveInitialPage, spreadProgress } from './reader.js'
 
 describe('reader utilities', () => {
   it('normalizes FB2-like text into readable paragraphs', () => {
@@ -41,6 +41,12 @@ describe('reader utilities', () => {
     expect(pageFromProgress(50, 20)).toBe(9)
     expect(pageFromProgress(100, 20)).toBe(19)
     expect(pageFromProgress(30, 0)).toBe(0)
+  })
+
+  it('resolves exact initial page without offset when currentPage is preserved', () => {
+    expect(resolveInitialPage({ currentPage: 5, progress: 20 }, 30)).toBe(5)
+    expect(resolveInitialPage({ currentPage: 0, progress: 50 }, 10)).toBe(0)
+    expect(resolveInitialPage({ progress: 50 }, 20)).toBe(9)
   })
 
   it('repairs UTF-8 text decoded as Windows-1252', () => {

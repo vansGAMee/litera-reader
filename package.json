@@ -24,10 +24,12 @@
     "@zip.js/zip.js": "^2.16.0",
     "foliate-js": "^1.0.1",
     "idb-keyval": "latest",
+    "jsqr": "^1.4.0",
     "lucide-react": "latest",
     "mammoth": "^1.12.3",
     "marked": "^18.0.13",
     "pdfjs-dist": "^6.3.289",
+    "qrcode": "^1.5.4",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"
