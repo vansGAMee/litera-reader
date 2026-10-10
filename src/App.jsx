@@ -24,8 +24,20 @@ function Cover({ book, onClick, compact = false }) {
   const [main, accent, ink] = book.palette
   const surname = book.author.split(' ').at(-1)
   const givenName = book.author.slice(0, Math.max(0, book.author.lastIndexOf(surname))).trim()
-  const surnameClass = surname.length > 12 ? 'cover-author--xl' : surname.length > 9 ? 'cover-author--long' : ''
-  return <button type="button" className={`cover ${compact ? 'cover--compact' : ''}`} style={{ '--main': main, '--accent': accent, '--ink': ink }} onClick={onClick} aria-label={`Открыть ${book.title}`}>
+  const authorLen = Math.max(1, surname.length)
+  const surnameClass = authorLen > 12 ? 'cover-author--xl' : authorLen > 8 ? 'cover-author--long' : ''
+  return <button
+    type="button"
+    className={`cover ${compact ? 'cover--compact' : ''}`}
+    style={{
+      '--main': main,
+      '--accent': accent,
+      '--ink': ink,
+      '--author-len': authorLen
+    }}
+    onClick={onClick}
+    aria-label={`Открыть ${book.title}`}
+  >
     {book.coverImage ? <img className="custom-cover" src={book.coverImage} alt={book.title} style={{ objectFit: book.coverFit || 'cover', objectPosition: `${book.coverX ?? 50}% ${book.coverY ?? 50}%` }}/> : <>
     <div className="cover-art"><span className="orb orb-a"/><span className="orb orb-b"/><span className="engraving">{getInitials(book.author)}</span></div>
     <div className="cover-name"><b>{getInitials(book.author)}</b><span>{givenName || 'Автор'}</span></div>
