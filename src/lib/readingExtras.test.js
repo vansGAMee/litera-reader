@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { formatReadingTime, gestureDirection, pdfBookTitle } from './readingExtras.js'
+import { usePageGestures } from './usePageGestures.js'
+
+vi.mock('react', () => ({
+  useRef: (init) => ({ current: init }),
+}))
 
 describe('reading time', () => {
   it('shows days, hours and minutes without zero units', () => {
@@ -25,3 +30,24 @@ describe('page gestures', () => {
     for (const patch of [{ dy: 90 }, { duration: 800 }, { selected: true }, { ratio: 0.5 }, { dx: 90, dy: 85 }]) expect(gestureDirection({ ...base, ...patch })).toBe(0)
   })
 })
+describe('usePageGestures', () => {
+  it('triggers onTurn on horizontal swipe', () => {
+    const onTurn = vi.fn()
+    const handlers = usePageGestures(onTurn, false)
+    const target = { getBoundingClientRect: () => ({ left: 0, width: 400 }), scrollTop: 0 }
+    handlers.onTouchStart({ touches: [{ clientX: 300, clientY: 400 }], target, currentTarget: target })
+    handlers.onTouchMove({ touches: [{ clientX: 100, clientY: 400 }] })
+    handlers.onTouchEnd({ currentTarget: target })
+    expect(onTurn).toHaveBeenCalledWith(1)
+  })
+  it('does NOT trigger onTurn if vertical scroll occurred during touch', () => {
+    const onTurn = vi.fn()
+    const handlers = usePageGestures(onTurn, false)
+    const target = { getBoundingClientRect: () => ({ left: 0, width: 400 }), scrollTop: 0 }
+    handlers.onTouchStart({ touches: [{ clientX: 350, clientY: 500 }], target, currentTarget: target })
+    target.scrollTop = 80 // Scrolled vertically
+    handlers.onTouchEnd({ currentTarget: target })
+    expect(onTurn).not.toHaveBeenCalled()
+  })
+})
+
