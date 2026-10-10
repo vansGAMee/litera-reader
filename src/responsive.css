@@ -18,5 +18,19 @@
   .reader-top{height:60px;padding:0 10px;grid-template-columns:36px minmax(0,1fr) auto;gap:8px}.reader-brand{display:none}.back{width:36px;height:44px;padding:0;justify-content:center}.reader-title{text-align:left}.reader-title b{font-size:16px}.reader-title span{font-size:9px;letter-spacing:.02em}.reader-actions button{min-width:38px}.reader-status{height:38px;padding:0 12px;gap:8px;grid-template-columns:auto minmax(12px,1fr) auto}.reader-status>span:last-child{font-size:10px;letter-spacing:0}.reader-status svg{display:none}
   .reading-desk{padding:10px 8px;display:block}.spread{height:auto;min-height:100%;filter:none}.paper{min-height:calc(100dvh - 200px);padding:22px 22px 20px;border-radius:3px}.page-right{display:none}.page-content{font-size:var(--reading-size);line-height:1.58}.running em{display:none}.running{font-size:9px}.chapter h1{font-size:30px;line-height:1.1}.chapter small{font-size:9px;letter-spacing:.1em}.reader-navigation{padding:8px 12px;gap:12px}.reader-navigation>button{flex-shrink:0}.page-slider small{font-size:8px}.reader-bottom{display:none}.visual-content{min-height:260px;margin:12px 0}.visual-paper{overflow:visible}.reader-actions button:first-child{display:none}
 }
+@media(max-width:760px){
+  .quote-trainer-overlay{padding:0}
+  .quote-trainer-modal{width:100%;height:100dvh;max-height:100dvh;border-radius:0;border:0}
+  .trainer-header{padding:14px 16px}
+  .trainer-body{padding:16px}
+  .quote-card{padding:22px 16px 18px}
+  .quote-text{font-size:19px;line-height:1.48}
+  .deck-controls{gap:10px}
+  .deck-btn{flex:1;padding:12px 14px;justify-content:center}
+  .deck-btn kbd{display:none}
+  .taste-stats-grid{grid-template-columns:repeat(2,1fr)}
+  .card-actions-row{grid-template-columns:1fr;gap:6px}
+}
 @media(max-width:380px){.tools{grid-template-columns:1fr}.select{justify-content:space-between}.book-info h3{font-size:17px}.reader-status>span:last-child{font-size:9px}.reader-status{font-size:9px}.page-slider small{display:none}.paper{padding-inline:18px}.reader-navigation{gap:8px}}
 @media(prefers-reduced-motion:reduce){.spread{animation:none}.reader-navigation>button{transition:none}}
+

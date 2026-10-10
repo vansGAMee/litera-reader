@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, Search, Settings2, StickyNote, Upload, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bookmark, BookOpen, Check, ChevronDown, Clock3, Focus, Heart, Highlighter, Library, Menu, Minus, Plus, Search, Settings2, Sparkles, StickyNote, Upload, X } from 'lucide-react'
 import { get, set } from 'idb-keyval'
 import { formatReadingTime } from './lib/readingExtras.js'
 import { usePageGestures } from './lib/usePageGestures.js'
 import CoverEditor from './CoverEditor.jsx'
+import QuoteTrainer from './QuoteTrainer.jsx'
 import { App as NativeApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { seedBooks } from './data.js'
@@ -32,6 +33,7 @@ function Cover({ book, onClick, compact = false }) {
 
 function App() {
   const [editing, setEditing] = useState(null)
+  const [aiTrainerBook, setAiTrainerBook] = useState(null)
   const [importErrors, setImportErrors] = useState([])
   const importLock = useRef(false)
   const [books, setBooks] = useState(seedBooks)
@@ -127,7 +129,10 @@ function App() {
       {visible.length ? <div className="book-grid">{visible.map((book, index) => <article className="book-card" key={book.id} style={{ '--delay': `${index * 45}ms` }}>
         <div className="book-stage"><Cover book={book} onClick={() => openBook(book.id)}/><button className={`favorite ${book.favorite ? 'on' : ''}`} onClick={() => patchBook(book.id, { favorite: !book.favorite })} aria-label="В избранное"><Heart size={16} fill={book.favorite ? 'currentColor' : 'none'}/></button></div>
         <div className="book-info"><div><h3>{book.title}</h3><p>{book.author}</p></div><button aria-label={`Удалить ${book.title}`} title="Удалить из библиотеки" onClick={() => { if (confirm(`Удалить «${book.title}» из библиотеки?`)) setBooks(all => all.filter(item => item.id !== book.id)) }}><X size={18}/></button></div>
-        <button className="edit-cover" onClick={() => setEditing(book.id)} aria-label={`Изменить обложку ${book.title}`}><Settings2 size={14}/> Обложка и название</button>
+        <div className="card-actions-row">
+          <button className="edit-cover" onClick={() => setEditing(book.id)} aria-label={`Изменить обложку ${book.title}`}><Settings2 size={14}/> Обложка</button>
+          <button className="ai-quote-card-btn" onClick={() => setAiTrainerBook(book)} aria-label={`Цитатник ИИ: ${book.title}`} title="Подобрать цитаты и обучить ИИ"><Sparkles size={14}/> Цитаты ИИ</button>
+        </div>
         <div className="progress-row"><span><i style={{ width: `${book.progress}%` }}/></span><small>{book.progress ? `${book.progress}%` : 'Не начато'}</small></div>
       </article>)}</div> : <div className="empty"><span>∅</span><h3>На этой полке пока пусто</h3><p>Измените фильтр или добавьте свою книгу.</p></div>}
 
@@ -139,6 +144,13 @@ function App() {
       await set(STORAGE_KEY, books.map(book => book.id === editing ? { ...book, ...patch } : book))
       patchBook(editing, patch)
     }} onClose={() => setEditing(null)}/>}
+    {aiTrainerBook && <QuoteTrainer book={aiTrainerBook} onClose={() => setAiTrainerBook(null)} onSaveQuote={(quoteData) => {
+      patchBook(aiTrainerBook.id, { notes: [{ id: Date.now(), ...quoteData }, ...(aiTrainerBook.notes || [])] })
+      setToast('Цитата сохранена в заметки')
+    }} onJumpToPage={(p) => {
+      setActiveId(aiTrainerBook.id)
+      setView('reader')
+    }} />}
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
@@ -152,6 +164,7 @@ function Reader({ book, onBack, onChange }) {
   const [panel, setPanel] = useState(null)
   const [focus, setFocus] = useState(false)
   const [notes, setNotes] = useState(book.notes || [])
+  const [trainerOpen, setTrainerOpen] = useState(false)
   const [selected, setSelected] = useState('')
   const locationRef = useRef(book.progress || 0)
   const skipInitialPersist = useRef(true)
@@ -209,7 +222,7 @@ function Reader({ book, onBack, onChange }) {
       <button className="reader-brand" onClick={onBack}><span>Л</span><i>ЛИТЕРА</i></button>
       <button className="back" onClick={onBack}><ArrowLeft size={17}/> Библиотека</button>
       <div className="reader-title"><b>{book.title}</b><span>{book.author}</span></div>
-      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
+      <div className="reader-actions"><button aria-label="Режим фокуса" aria-pressed={focus} onClick={() => setFocus(!focus)} title="Режим фокуса (F)"><Focus size={18}/></button><button aria-label="ИИ-Цитатник" onClick={() => setTrainerOpen(true)} title="ИИ-Цитатник (поиск и обучение)" className="ai-quote-trigger"><Sparkles size={18}/><span>ИИ</span></button><button aria-label="Заметки и цитаты" aria-expanded={panel === 'notes'} onClick={(e) => openPanel('notes', e)}><StickyNote size={18}/><span>{notes.length}</span></button><button aria-label="Настройки чтения" aria-expanded={panel === 'settings'} onClick={(e) => openPanel('settings', e)}><Settings2 size={18}/></button></div>
     </header>
     <div className="reader-status"><span><b>{String(current + 1).padStart(3,'0')}</b> / {String(pages.length).padStart(3,'0')}</span><div><i style={{ width: `${pct}%` }}/></div><span><Clock3 size={14}/> <span aria-label="Осталось читать">≈ {formatReadingTime(remaining)} до конца</span></span></div>
 
@@ -231,6 +244,9 @@ function Reader({ book, onBack, onChange }) {
     {panel && <div className="panel-backdrop" onClick={closePanel}><aside ref={panelRef} className="side-panel" role="dialog" aria-modal="true" aria-label={panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'} onClick={(e) => e.stopPropagation()}><div className="panel-head"><div><small>{panel === 'settings' ? 'ВИД ИЗДАНИЯ' : 'ПОЛЯ ЧИТАТЕЛЯ'}</small><h2>{panel === 'settings' ? 'Настройки чтения' : 'Заметки и цитаты'}</h2></div><button aria-label="Закрыть" autoFocus onClick={closePanel}><X/></button></div>
       {panel === 'settings' ? <div className="settings-list"><section className="reading-estimate"><b>≈ {formatReadingTime(remaining)} до конца</b><p>{isVisual ? 'Приблизительно: по времени на одну страницу, включая текущую.' : 'По объёму оставшегося текста, включая текущую страницу.'}</p><label>{isVisual ? 'Секунд на страницу' : 'Слов в минуту'}<b>{isVisual ? pageSeconds : speed}</b></label><input aria-label={isVisual ? 'Секунд на страницу' : 'Скорость чтения'} type="range" min={isVisual ? 30 : 100} max={isVisual ? 180 : 450} step={isVisual ? 15 : 5} value={isVisual ? pageSeconds : speed} onChange={e => isVisual ? setPageSeconds(+e.target.value) : setSpeed(+e.target.value)}/></section><section><label>Кегль текста <b>{fontSize}px</b></label><div className="stepper"><button onClick={() => setFontSize(Math.max(15,fontSize-1))}><Minus/></button><span>Аа</span><button onClick={() => setFontSize(Math.min(25,fontSize+1))}><Plus/></button></div></section><section><label>Оттенок бумаги</label><div className="themes">{[['paper','Слоновая кость'],['white','Белый лист'],['sepia','Сепия'],['night','Ночной']].map(([key,label]) => <button key={key} onClick={() => setTheme(key)} className={`${key} ${theme === key ? 'active' : ''}`}><i/>{label}</button>)}</div></section><section className="quiet"><Focus/><div><b>Тихий режим</b><p>Нажмите F — всё лишнее исчезнет, останется только книга.</p></div></section></div> : <div className="notes-list">{notes.length ? notes.map((item) => <article key={item.id}><small>СТРАНИЦА {item.page}</small><blockquote>«{item.quote}»</blockquote>{item.note && <p>{item.note}</p>}<button onClick={() => setNotes(n => n.filter(x => x.id !== item.id))}>Удалить</button></article>) : <div className="no-notes"><Highlighter/><h3>Здесь пока тихо</h3><p>Выделите фрагмент текста и сохраните его как цитату или заметку.</p></div>}</div>}
     </aside></div>}
+    {trainerOpen && <QuoteTrainer book={book} onClose={() => setTrainerOpen(false)} onSaveQuote={(quoteData) => {
+      setNotes((all) => [{ id: Date.now(), ...quoteData }, ...all])
+    }} onJumpToPage={(p) => jumpPage(p)} />}
   </div>
 }
 
