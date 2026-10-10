@@ -79,9 +79,11 @@ body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bot
 .quote-ornament .br{bottom:6px;right:6px;border-left:0;border-top:0}
 
 .quote-meta-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #ece4d4;padding-bottom:12px}
-.quote-page-tag{font:600 10px 'Space Grotesk';text-transform:uppercase;letter-spacing:.12em;color:#7e7769}
 .quote-match-pill{display:inline-flex;align-items:center;gap:5px;background:#f3ecdb;color:#79271a;border:1px solid #d5c8b5;font:600 11px 'Space Grotesk';padding:3px 9px;border-radius:12px}
 .quote-match-pill.sm{font-size:10px;padding:2px 7px}
+.quote-meaning-pill{display:inline-flex;align-items:center;gap:5px;background:#181713;color:#faf4e6;font:600 10px 'Space Grotesk';padding:3px 9px;border-radius:12px;letter-spacing:.03em;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quote-meaning-pill.sm{font-size:9px;padding:2px 7px;max-width:200px}
+.list-badges{display:flex;align-items:center;gap:8px}
 
 .quote-text{font:italic clamp(20px,2.8vw,26px)/1.55 'EB Garamond';margin:8px 0;color:#181713;text-align:justify;position:relative}
 .quote-card-footer{display:flex;justify-content:flex-end;border-top:1px solid #ece4d4;padding-top:12px}

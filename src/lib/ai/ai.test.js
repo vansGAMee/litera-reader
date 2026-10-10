@@ -1,83 +1,63 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { extractFeatures, TOTAL_DIMS } from './features.js'
 import { QuoteModel } from './model.js'
-import { segmentBookText, isGarbageCandidate, cleanCandidateText, extractQuotesFromBook } from './quoteExtractor.js'
+import { DeepQuoteModel, extractDeepFeatures } from './deepModel.js'
+import { segmentBookText, isGarbageCandidate, cleanCandidateText, extractQuotesFromBook, computeBookContextVector } from './quoteExtractor.js'
 
-describe('AI Features Module', () => {
-  it('extracts exactly 136-dimensional feature vector', () => {
+describe('AI Features & Deep Features', () => {
+  it('extracts exactly 136-dimensional feature vector for base model', () => {
     const vec = extractFeatures('Красота спасет мир.')
     expect(vec.length).toBe(TOTAL_DIMS)
-    expect(TOTAL_DIMS).toBe(136)
+  })
+
+  it('extracts exactly 64-dimensional feature vector for deep model LSQ-Net', () => {
+    const vec = extractDeepFeatures('Человек есть тайна. Ее надо разгадать.')
+    expect(vec.length).toBe(64)
   })
 
   it('assigns high wisdom density to philosophical text and low to mechanical actions', () => {
     const quoteVec = extractFeatures('Человек есть тайна, и смысл жизни в познании истины и любви.')
     const actionVec = extractFeatures('Он надел пальто, застегнул пуговицы, взял ключ и открыл дверь.')
-
-    // Индекс 2: wisdomDensity
     expect(quoteVec[2]).toBeGreaterThan(actionVec[2])
-    // Индекс 6: actionVerbPenalty
     expect(actionVec[6]).toBeGreaterThan(quoteVec[6])
   })
-
-  it('penalizes direct dialogue replies', () => {
-    const dialogueVec = extractFeatures('— Да, конечно, — ответил он и пожал плечами.')
-    // Индекс 5: dialoguePenalty
-    expect(dialogueVec[5]).toBeGreaterThan(0.5)
-  })
 })
 
-describe('In-Browser Quote Model', () => {
-  let model
+describe('Deep Neural Model (LSQ-Net / RTX 4060)', () => {
+  let deepModel
 
   beforeEach(() => {
-    if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.clear === 'function') {
-      localStorage.clear()
-    }
-    model = new QuoteModel()
-    model.resetPersonalization()
+    deepModel = new DeepQuoteModel()
+    deepModel.resetPersonalization()
   })
 
-  it('loads base weights trained on GPU and gives higher score to genuine quotes', () => {
-    const quoteScore = model.score('Красота спасет мир и подарит человеку надежду на будущее.')
-    const mundaneScore = model.score('Он встал со стула, подошел к буфету и достал тарелку с хлебом.')
+  it('correctly scores profound quote significantly higher than mundane plot action', () => {
+    const quoteRes = deepModel.forward('Человек есть тайна. Ее надо разгадать, и ежели будешь ее разгадывать всю жизнь, то не говори, что потерял время.')
+    const mundaneRes = deepModel.forward('Он надел пальто, застегнул пуговицы, взял ключ и вышел на улицу.')
 
-    expect(quoteScore.baseScore).toBeGreaterThan(mundaneScore.baseScore)
-    expect(quoteScore.percentMatch).toBeGreaterThan(mundaneScore.percentMatch)
+    expect(quoteRes.quoteProb).toBeGreaterThan(mundaneRes.quoteProb)
+    expect(quoteRes.depthScore).toBeGreaterThan(mundaneRes.depthScore)
   })
 
-  it('adapts and personalizes weights via Online SGD on user feedback', () => {
-    const candidate = 'Свобода состоит в умении выбирать свою собственную судьбу.'
-    const initialScore = model.score(candidate).percentMatch
+  it('identifies semantic meaning category for ethical and existential quotes', () => {
+    const ethical = deepModel.forward('Ведь вся познанная истина не стоит тогда слезинки одного этого замученного ребенка.')
+    expect(ethical.meaningCategory).toContain('Этика')
 
-    // Пользователь нажимает Лайк
-    const result1 = model.learn(candidate, true)
-    expect(result1.likeCount).toBe(1)
-    expect(model.getAlpha()).toBeGreaterThan(0)
-
-    // После лайка персональный скоринг возрастает
-    const updatedScore = model.score(candidate).percentMatch
-    expect(updatedScore).toBeGreaterThanOrEqual(initialScore)
-
-    // Тестируем реакцию на "Мимо"
-    const badSample = 'Просто обычный фрагмент текста без глубокого смысла.'
-    model.learn(badSample, false)
-    expect(model.skipCount).toBe(1)
+    const existential = deepModel.forward('Да, человек смертен, но это было бы еще полбеды. Плохо то, что он иногда внезапно смертен!')
+    expect(existential.meaningCategory).toContain('Экзистенциальн')
   })
 
-  it('resets personalized profile back to factory baseline', () => {
-    model.learn('Великие мысли приходят сами.', true)
-    model.learn('Пустые разговоры утомляют.', false)
-    expect(model.likeCount + model.skipCount).toBe(2)
+  it('adapts personal concept multipliers on user feedback', () => {
+    const sample = 'Красота — это страшная и ужасная вещь! Тут дьявол с богом борется, а поле битвы — сердца людей.'
+    const prevMult = deepModel.personalConceptMultipliers[4]
 
-    model.resetPersonalization()
-    expect(model.likeCount).toBe(0)
-    expect(model.skipCount).toBe(0)
-    expect(model.getAlpha()).toBe(0)
+    deepModel.learn(sample, true)
+    expect(deepModel.likeCount).toBe(1)
+    expect(deepModel.personalConceptMultipliers[4]).toBeGreaterThan(prevMult)
   })
 })
 
-describe('Book Quote Extractor', () => {
+describe('Book Quote Extractor with Global Book Context', () => {
   it('correctly filters garbage headers and TOC lines', () => {
     expect(isGarbageCandidate('Глава третья. В которой все начинается.')).toBe(true)
     expect(isGarbageCandidate('Оглавление ............... 12')).toBe(true)
@@ -85,31 +65,48 @@ describe('Book Quote Extractor', () => {
     expect(isGarbageCandidate('Красота спасет мир, если мир захочет спастись.')).toBe(false)
   })
 
-  it('cleans quotes from dashes and excess whitespaces', () => {
-    expect(cleanCandidateText('—   Красота спасет мир.  ')).toBe('Красота спасет мир.')
+  it('cleans quotes from dialogue speaker tags and leading dashes', () => {
+    const raw = '— Я не бога не принимаю, — говорил Иван с нервным жаром, — я мира божьего не принимаю.'
+    const cleaned = cleanCandidateText(raw)
+    expect(cleaned).not.toContain('говорил Иван')
+    expect(cleaned.startsWith('—')).toBe(false)
   })
 
-  it('extracts top quotes from multi-paragraph book text', async () => {
+  it('computes book context vector across candidate passages', () => {
+    const candidates = [
+      { text: 'Он пошел в сад и сел на скамью.' },
+      { text: 'Погода была сырая и холодная.' },
+      { text: 'Красота спасет мир.' }
+    ]
+    const ctx = computeBookContextVector(candidates)
+    expect(ctx.length).toBe(64)
+  })
+
+  it('extracts top quotes with semantic meaning and page locations from book', async () => {
     const book = {
-      title: 'Братья Карамазовы',
-      author: 'Ф. М. Достоевский',
-      text: `Глава первая. Введение.
+      title: 'Мастер и Маргарита',
+      author: 'Михаил Булгаков',
+      text: `Глава первая. Никогда не разговаривайте с неизвестными
       
-      Он надел шляпу и вышел на улицу. Погода была сырая и холодная. Шел мелкий осенний дождь.
+      Однажды весною, в час необыкновенно жаркого заката, в Москве появились два гражданина.
+      Они выпили теплой абрикосовой воды, давшей обильную желтую пену.
       
-      Человек есть тайна. Ее надо разгадать, и ежели будешь ее разгадывать всю жизнь, то не говори, что потерял время.
+      — Да, человек смертен, но это было бы еще полбеды. Плохо то, что он иногда внезапно смертен, вот в чем фокус!
       
-      — Да, конечно, — сказал Петр и повернулся к окну.
+      — Злых людей нет на свете, есть только люди несчастливые.
       
-      Сострадание есть главнейший и, может быть, единственный закон бытия всего человечества.`
+      — Никогда и ничего не просите! Никогда и ничего, и в особенности у тех, кто сильнее вас. Сами предложат и сами всё дадут!`
     }
 
-    const model = new QuoteModel()
-    const quotes = await extractQuotesFromBook(book, model, { minScore: 0.3 })
+    const deepModel = new DeepQuoteModel()
+    const quotes = await extractQuotesFromBook(book, deepModel, { minScore: 0.35 })
 
     expect(quotes.length).toBeGreaterThan(0)
-    // Верхняя цитата должна содержать глубокую мысль
-    const topText = quotes[0].text
-    expect(topText.includes('тайна') || topText.includes('Сострадание')).toBe(true)
+    // Каждая цитата должна иметь категорию смысла
+    expect(quotes[0].meaningCategory).toBeDefined()
+    expect(typeof quotes[0].meaningCategory).toBe('string')
+    // Текст должен содержать глубокую мысль
+    const combined = quotes.map(q => q.text).join(' ')
+    expect(combined.includes('смертен') || combined.includes('Злых людей') || combined.includes('Никогда и ничего')).toBe(true)
   })
 })

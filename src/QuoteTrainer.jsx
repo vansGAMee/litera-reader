@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { Check, Compass, Cpu, Heart, RefreshCw, RotateCcw, Sparkles, ThumbsDown, X, BookOpen, Layers, SlidersHorizontal } from 'lucide-react'
-import { globalQuoteModel } from './lib/ai/model.js'
+import { Check, Compass, Cpu, Heart, RefreshCw, RotateCcw, Sparkles, ThumbsDown, X, BookOpen, Layers } from 'lucide-react'
+import { globalDeepModel } from './lib/ai/deepModel.js'
 import { extractQuotesFromBook } from './lib/ai/quoteExtractor.js'
 
 export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage }) {
@@ -13,17 +13,17 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
   const [liked, setLiked] = useState(new Set())
   const [lastAction, setLastAction] = useState(null)
   const [toast, setToast] = useState('')
-  const [tasteProfile, setTasteProfile] = useState(() => globalQuoteModel.getTasteProfile())
+  const [tasteProfile, setTasteProfile] = useState(() => globalDeepModel.getTasteProfile())
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('score') // 'score' | 'page'
 
-  // Загрузка и извлечение цитат
+  // Загрузка и извлечение цитат с семантическим анализом всей книги
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setProgress(0)
 
-    extractQuotesFromBook(book, globalQuoteModel, {
+    extractQuotesFromBook(book, globalDeepModel, {
       onProgress: (p) => {
         if (!cancelled) setProgress(p)
       }
@@ -40,7 +40,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
   }, [book])
 
   const refreshTaste = useCallback(() => {
-    setTasteProfile(globalQuoteModel.getTasteProfile())
+    setTasteProfile(globalDeepModel.getTasteProfile())
   }, [])
 
   const currentQuote = quotes[currentIndex]
@@ -48,7 +48,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
   // Обработка Лайка
   const handleLike = useCallback((quote = currentQuote) => {
     if (!quote) return
-    const result = globalQuoteModel.learn(quote.text, true)
+    globalDeepModel.learn(quote.text, true)
     setReviewed(prev => new Set(prev).add(quote.id))
     setLiked(prev => new Set(prev).add(quote.id))
     setLastAction({ type: 'like', quote })
@@ -58,7 +58,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
       onSaveQuote({
         quote: quote.text,
         page: quote.page,
-        note: `✨ Рекомендация ИИ (совпадение ${quote.percentMatch}%)`
+        note: `✨ ${quote.meaningCategory || 'Цитата'} (${quote.percentMatch}% совпадение)`
       })
     }
 
@@ -69,7 +69,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
   // Обработка "Мимо"
   const handleSkip = useCallback((quote = currentQuote) => {
     if (!quote) return
-    globalQuoteModel.learn(quote.text, false)
+    globalDeepModel.learn(quote.text, false)
     setReviewed(prev => new Set(prev).add(quote.id))
     setLastAction({ type: 'skip', quote })
     setToast(`Пропущено · ИИ учёл ваши предпочтения`)
@@ -98,8 +98,8 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
 
   // Сброс обучения
   const handleResetTaste = useCallback(() => {
-    if (confirm('Сбросить персональное обучение ИИ к заводским весам (CUDA RTX 4060)?')) {
-      globalQuoteModel.resetPersonalization()
+    if (confirm('Сбросить персональное обучение нейросети к заводским весам (CUDA RTX 4060)?')) {
+      globalDeepModel.resetPersonalization()
       refreshTaste()
       setToast('Модель сброшена к базовым весам')
     }
@@ -148,7 +148,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
         {/* Заголовок */}
         <header className="trainer-header">
           <div className="trainer-brand">
-            <span className="trainer-badge"><Sparkles size={16}/> ИИ-ЦИТАТНИК</span>
+            <span className="trainer-badge"><Sparkles size={16}/> LSQ-Net · ИИ-ЦИТАТНИК</span>
             <h2>{book.title}</h2>
             <small>{book.author}</small>
           </div>
@@ -184,8 +184,8 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
           {loading ? (
             <div className="trainer-loading">
               <span className="brand-mark animate-spin">Л</span>
-              <h3>ИИ анализирует книгу…</h3>
-              <p>Вычленение смысловых цитат и ранжирование модели на RTX 4060</p>
+              <h3>Нейросеть LSQ-Net сканирует книгу…</h3>
+              <p>Анализ глобального семантического контекста и поиск смысловых пиков на RTX 4060</p>
               <div className="trainer-progress-bar">
                 <i style={{ width: `${progress}%` }}/>
               </div>
@@ -214,6 +214,11 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
                       <span className="quote-page-tag">
                         Страница ~{currentQuote.page}
                       </span>
+                      {currentQuote.meaningCategory && (
+                        <span className="quote-meaning-pill" title="Распознанный смысл высказывания">
+                          ✨ {currentQuote.meaningCategory}
+                        </span>
+                      )}
                       <span className="quote-match-pill" title="Вероятность цитаты с учетом вашего вкуса">
                         <Sparkles size={13}/> {currentQuote.percentMatch}% совпадение
                       </span>
@@ -285,9 +290,9 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
                   <div className="complete-icon">✨</div>
                   <h3>Все цитаты просмотрены!</h3>
                   <p>
-                    Вы оценили все предложенные цитаты из этой книги. Сохранено в заметки: <b>{liked.size}</b>.
+                    Вы оценили все смысловые пики этой книги. Сохранено в заметки: <b>{liked.size}</b>.
                   </p>
-                  <p>Модель адаптировала персональные веса под ваш читательский вкус.</p>
+                  <p>Нейросеть откалибровала смысловые головы внимания под ваш вкус.</p>
                   <div className="deck-complete-actions">
                     <button type="button" onClick={() => setCurrentIndex(0)}>
                       <RefreshCw size={15}/> Начать заново
@@ -332,9 +337,16 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
                     <article key={q.id} className="list-quote-item">
                       <div className="list-quote-head">
                         <small>СТРАНИЦА ~{q.page}</small>
-                        <span className="quote-match-pill sm">
-                          <Sparkles size={11}/> {q.percentMatch}%
-                        </span>
+                        <div className="list-badges">
+                          {q.meaningCategory && (
+                            <span className="quote-meaning-pill sm">
+                              {q.meaningCategory}
+                            </span>
+                          )}
+                          <span className="quote-match-pill sm">
+                            <Sparkles size={11}/> {q.percentMatch}%
+                          </span>
+                        </div>
                       </div>
                       <blockquote>«{q.text}»</blockquote>
                       <div className="list-quote-actions">
@@ -371,8 +383,8 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
                 <div className="taste-badge-header">
                   <Cpu size={24}/>
                   <div>
-                    <h4>Нейросетевая персонализация</h4>
-                    <p>Предобучена на NVIDIA GeForce RTX 4060 (CUDA cores)</p>
+                    <h4>Семантическая нейросеть LSQ-Net</h4>
+                    <p>Обучена на ядрах CUDA (NVIDIA GeForce RTX 4060)</p>
                   </div>
                 </div>
 
@@ -391,7 +403,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
                   </div>
                   <div className="stat-box">
                     <b>{tasteProfile.adaptationPercent || 0}%</b>
-                    <span>Адаптация вкуса</span>
+                    <span>Калибровка вкуса</span>
                   </div>
                 </div>
 
@@ -402,7 +414,7 @@ export default function QuoteTrainer({ book, onClose, onSaveQuote, onJumpToPage 
 
                 {tasteProfile.traits && (
                   <div className="taste-traits-box">
-                    <h5>Выявленные предпочтения читателя:</h5>
+                    <h5>Любимые темы и смысловые паттерны:</h5>
                     <div className="traits-pills">
                       {tasteProfile.traits.map((t, idx) => (
                         <span key={idx} className="trait-pill">

@@ -38,7 +38,7 @@ test('AI quote trainer opens, scores quotes, learns from likes and skips, and up
 
   // 5. Переходим на вкладку "Вкус ИИ"
   await modal.getByRole('button', { name: /Вкус ИИ/ }).click()
-  await expect(modal.getByText('Нейросетевая персонализация')).toBeVisible()
+  await expect(modal.getByText('Семантическая нейросеть LSQ-Net')).toBeVisible()
   await expect(modal.getByText('NVIDIA GeForce RTX 4060')).toBeVisible()
   await expect(modal.locator('.stat-box b').first()).toContainText('2') // Всего 2 оценки (1 лайк, 1 мимо)
 
