@@ -21,7 +21,9 @@
   .selection-floating-bar{top:calc(env(safe-area-inset-top) + 64px);width:calc(100% - 16px);max-width:100%}
   .selection-pill{padding:6px 10px;gap:6px}.selection-snippet{font-size:12px}.save-quote-action{padding:6px 10px;font-size:10px}
   .sync-modal-dialog{width:100%;max-height:100dvh;padding:18px 16px;border-radius:0}
-  .camera-viewfinder{max-width:230px}
+  .sync-qr-split{grid-template-columns:1fr;gap:16px}
+  .sync-tab-btn{padding:8px 10px;font-size:10px}
+  .camera-viewfinder{max-width:210px}
 }
 @media(max-width:760px){
   .quote-trainer-overlay{padding:0}

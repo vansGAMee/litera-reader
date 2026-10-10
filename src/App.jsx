@@ -13,6 +13,8 @@ import { estimateMinutes, getInitials, normalizeText, pageFromProgress, paginate
 import { calculateEstimatedMinutes, countWords, getReadingProfile, recordReadingSample, resetReadingProfile, saveReadingProfile } from './lib/readingTracker.js'
 import { importBook } from './lib/importBook.js'
 import { migrateStoredBooks } from './lib/migrateLibrary.js'
+import { extractSyncPayloadFromUrl, mergeLibraryProgress } from './lib/syncQr.js'
+import { importLibraryBundle, isLibraryBackupContent, isLibraryBackupFileName } from './lib/libraryBackup.js'
 
 const STORAGE_KEY = 'litera-library-v1'
 const paletteNames = ['Терракотовая', 'Прусская', 'Оливковая']
@@ -76,6 +78,32 @@ function App() {
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 2600); return () => clearTimeout(id) }, [toast])
   useEffect(() => { const handler = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchRef.current?.focus() } }; addEventListener('keydown', handler); return () => removeEventListener('keydown', handler) }, [])
 
+  // Auto-sync reading progress if opened via direct sync link (#sync=...)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !hydrated) return
+    const hash = window.location.hash
+    if (hash && hash.includes('sync=')) {
+      const parsed = extractSyncPayloadFromUrl(hash)
+      if (parsed && parsed.items?.length) {
+        setBooks((current) => {
+          const { updatedBooks, changedCount, updatedTitles } = mergeLibraryProgress(current, parsed)
+          if (changedCount > 0) {
+            setToast(`Синхронизировано из ссылки: ${changedCount} книг (${updatedTitles.slice(0, 2).join(', ')})`)
+            return updatedBooks
+          } else {
+            setToast('Прогресс из ссылки уже актуален')
+            return current
+          }
+        })
+      }
+      try {
+        history.replaceState(null, '', window.location.pathname + window.location.search)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [hydrated])
+
   const visible = useMemo(() => books.filter((book) => {
     const matches = `${book.title} ${book.author}`.toLowerCase().includes(query.toLowerCase())
     return matches && (filter === 'all' || (filter === 'reading' && book.progress > 0 && book.progress < 100) || (filter === 'favorite' && book.favorite))
@@ -92,14 +120,29 @@ function App() {
     setUploading(true)
     setImportErrors([])
     const imported = []; const errors = []
+    let backupImported = false
     for (const file of [...files]) {
-      try { imported.push(await importBook(file)) }
+      try {
+        if (isLibraryBackupFileName(file.name)) {
+          const text = await file.text()
+          if (isLibraryBackupContent(text)) {
+            const res = await importLibraryBundle(text, books, 'merge')
+            setBooks(res.books)
+            setToast(`Библиотека восстановлена: +${res.addedCount} новых книг, обновлено ${res.updatedCount}`)
+            backupImported = true
+            continue
+          }
+        }
+        imported.push(await importBook(file))
+      }
       catch (error) { errors.push(`${file.name}: ${error.message}`) }
     }
     if (imported.length) setBooks((current) => [...imported, ...current])
     setImportErrors(errors)
     importLock.current = false
-    setToast(errors.length ? `${imported.length} добавлено · ${errors[0]}` : `Добавлено книг: ${imported.length}`)
+    if (!backupImported) {
+      setToast(errors.length ? `${imported.length} добавлено · ${errors[0]}` : `Добавлено книг: ${imported.length}`)
+    }
     setUploading(false)
   }
 
@@ -160,6 +203,10 @@ function App() {
       setView('reader')
     }} />}
     {syncOpen && <SyncModal books={books} onSyncApply={(updated, msg) => {
+      setBooks(updated)
+      setToast(msg)
+      setSyncOpen(false)
+    }} onLibraryImport={(updated, msg) => {
       setBooks(updated)
       setToast(msg)
       setSyncOpen(false)

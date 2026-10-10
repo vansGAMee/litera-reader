@@ -38,10 +38,43 @@ export function encodeSyncPayload(books = []) {
   return JSON.stringify(payload)
 }
 
+export function generateSyncUrl(books = [], baseUrl = '') {
+  const base = baseUrl || (typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : '')
+  const payload = encodeSyncPayload(books)
+  return `${base}#sync=${encodeURIComponent(payload)}`
+}
+
+export function extractSyncPayloadFromUrl(urlOrHash = '') {
+  if (typeof urlOrHash !== 'string') return null
+  let raw = urlOrHash.trim()
+  if (raw.includes('#sync=')) {
+    raw = raw.split('#sync=')[1]
+  } else if (raw.includes('?sync=')) {
+    raw = raw.split('?sync=')[1]?.split('&')[0]
+  } else if (raw.startsWith('#sync=')) {
+    raw = raw.slice(6)
+  }
+  try {
+    raw = decodeURIComponent(raw)
+  } catch {
+    /* ignore */
+  }
+  return decodeSyncPayload(raw)
+}
+
 export function decodeSyncPayload(rawString = '') {
   if (typeof rawString !== 'string') return null
-  const trimmed = rawString.trim()
+  let trimmed = rawString.trim()
   if (!trimmed) return null
+
+  // If input is a full URL or hash, extract the payload part first
+  if (trimmed.includes('#sync=')) {
+    trimmed = decodeURIComponent(trimmed.split('#sync=')[1])
+  } else if (trimmed.includes('?sync=')) {
+    trimmed = decodeURIComponent(trimmed.split('?sync=')[1]?.split('&')[0])
+  } else if (trimmed.startsWith('#sync=')) {
+    trimmed = decodeURIComponent(trimmed.slice(6))
+  }
 
   let data
   try {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { decodeSyncPayload, encodeSyncPayload, mergeLibraryProgress, normalizeKey } from './syncQr.js'
+import {
+  decodeSyncPayload,
+  encodeSyncPayload,
+  extractSyncPayloadFromUrl,
+  generateSyncUrl,
+  mergeLibraryProgress,
+  normalizeKey,
+} from './syncQr.js'
 
 describe('syncQr utilities', () => {
   const books = [
@@ -67,5 +74,26 @@ describe('syncQr utilities', () => {
 
     const tolstoy = updatedBooks.find((b) => b.id === 'tolstoy')
     expect(tolstoy.progress).toBe(50)
+  })
+
+  it('generates and parses sync URL correctly', () => {
+    const url = generateSyncUrl(books, 'https://litera.app/')
+    expect(url).toContain('https://litera.app/#sync=')
+
+    const extracted = extractSyncPayloadFromUrl(url)
+    expect(extracted).not.toBeNull()
+    expect(extracted.items.length).toBe(2)
+    expect(extracted.items.find((x) => x.id === 'dostoevsky')?.p).toBe(45)
+
+    // Also handles direct hash string
+    const hash = url.split('https://litera.app/')[1]
+    const fromHash = extractSyncPayloadFromUrl(hash)
+    expect(fromHash).not.toBeNull()
+    expect(fromHash.items.length).toBe(2)
+
+    // Also handles URL passed into decodeSyncPayload
+    const fromDecode = decodeSyncPayload(url)
+    expect(fromDecode).not.toBeNull()
+    expect(fromDecode.items.length).toBe(2)
   })
 })
